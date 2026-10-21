@@ -128,24 +128,36 @@ fun BookshelfScreen(
     DisposableEffect(Unit) {
         onDispose { onSelectionModeChanged(false) }
     }
-    // ACTION_GET_CONTENT 而不是 OPEN_DOCUMENT：后者只能用系统 DocumentsUI（简陋），
-    // 前者允许 OEM 文件管理（vivo 等，带搜索）接管。授权是一次性的，导入在选择后
-    // 立即把内容读进会话/私有目录，够用；类型校验在 prepare() 里做。
+    // 批量任务可能跨进程恢复，必须拿可持久化的文档授权，不能依赖 Activity 的临时授权。
     var importMenuVisible by remember { mutableStateOf(false) }
     val documentLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetMultipleContents()
+        contract = ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
         // 单本仍走预览确认（能挑分章规则）；多本自动取最佳规则批量入库。
         when {
             uris.isEmpty() -> Unit
             uris.size == 1 -> viewModel.importDocument(uris.first())
-            else -> viewModel.importBatch(uris)
+            else -> scope.launch {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable + kotlinx.coroutines.Dispatchers.IO) {
+                    uris.forEach { uri ->
+                        runCatching {
+                            context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                    }
+                    viewModel.importBatch(uris)
+                }
+            }
         }
     }
     val folderLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
     ) { treeUri ->
-        treeUri?.let(onOpenFolderPicker)
+        treeUri?.let { uri ->
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            onOpenFolderPicker(uri)
+        }
     }
     LaunchedEffect(externalImportUri) {
         externalImportUri?.let { uri ->
@@ -319,6 +331,7 @@ fun BookshelfScreen(
                             collectionDragState = collectionDragState,
                             onShelfDrop = onShelfDrop,
                             onSetLayout = viewModel::setLayout,
+                            onSetGridColumns = viewModel::setGridColumns,
                             onSetReadStateFilter = viewModel::setReadStateFilter,
                             onSelectGroup = viewModel::selectGroup,
                             onToggleTagFilter = viewModel::toggleTagFilter,
@@ -344,6 +357,7 @@ fun BookshelfScreen(
                             collectionDragState = collectionDragState,
                             onShelfDrop = onShelfDrop,
                             onSetLayout = viewModel::setLayout,
+                            onSetGridColumns = viewModel::setGridColumns,
                             onSetReadStateFilter = viewModel::setReadStateFilter,
                             onSelectGroup = viewModel::selectGroup,
                             onToggleTagFilter = viewModel::toggleTagFilter,
@@ -432,7 +446,7 @@ fun BookshelfScreen(
             onDismiss = { importMenuVisible = false },
             onPickFiles = {
                 importMenuVisible = false
-                documentLauncher.launch("*/*")
+                documentLauncher.launch(arrayOf("*/*"))
             },
             onPickFolder = {
                 importMenuVisible = false
@@ -487,6 +501,7 @@ fun BookshelfScreen(
             ?.let { entry ->
                 CollectionContentsSheet(
                     entry = entry,
+                    gridColumns = state.gridColumns,
                     onOpenBook = { bookId -> onOpenBookDetail(bookId, null) },
                     onReorderBooks = { bookIds ->
                         viewModel.reorderCollectionBooks(entry.collection.id, bookIds)
@@ -566,7 +581,7 @@ private fun ImportMethodSheet(
     MoReadBottomSheet(
         onDismissRequest = onDismiss,
         sheetMaxWidth = MoReadLayoutPolicy.SheetMaxWidthDp.dp,
-        sheetState = rememberModalBottomSheetState()
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ) {
         Column(
             modifier = Modifier

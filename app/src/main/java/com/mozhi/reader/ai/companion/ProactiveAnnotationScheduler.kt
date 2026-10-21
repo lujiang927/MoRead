@@ -49,9 +49,16 @@ internal fun annotationChapterRange(chapterIndex: Int, ahead: Int, lastIndex: In
 
 // The sole worker cannot race another attempt. A PENDING row is an interrupted process's
 // checkpoint, so waiting ten minutes only leaves a freshly reopened chapter without notes.
-internal fun ProactiveAnnotationJobEntity.canAttempt(): Boolean = status != "DONE" && attempts < 2
+internal fun ProactiveAnnotationJobEntity.canAttempt(hasRemainingCandidates: Boolean = false): Boolean =
+    attempts < 2 && (status != "DONE" || hasRemainingCandidates)
 
 internal const val PROACTIVE_ANNOTATION_RETRY_DELAY_MS = 2_000L
+
+/**
+ * 开了预生成时，正在读的这一章每轮先写几格再让给后面的章节。一格一让的话，提前两章就只剩
+ * 三分之一的速度留给眼前这章，读者翻得比生成快，后半章常常一条都等不到。
+ */
+internal const val PROACTIVE_VISIBLE_CHAPTER_SLOTS_PER_PASS = 3
 
 internal fun annotationBudgetShare(remaining: Int, personas: Int): Int =
     if (remaining == Int.MAX_VALUE) Int.MAX_VALUE
@@ -357,7 +364,23 @@ class ProactiveAnnotationScheduler @Inject constructor(
         if (!readerContextValid()) return
         val now = System.currentTimeMillis()
         val old = dao.find(trigger.bookId, trigger.chapterIndex, personaId, revision)
-        if (old != null && !old.canAttempt()) return
+        if (old != null && old.status != "DONE" && !old.canAttempt()) return
+        val done = runCatching {
+            Json.decodeFromString<List<Int>>(old?.doneParagraphEnds ?: "[]").toMutableSet()
+                .also { ends -> require(ends.all { it >= 0 }) }
+        }.getOrElse {
+            old?.let { dao.update(it.copy(status = "FAILED", attempts = 2, failureReason = "invalid_paragraph_ledger")) }
+            return
+        }
+        val candidateLimit = if (initial.limits.chapterUnlimited) Int.MAX_VALUE else initial.limits.maxPerChapter
+        // DONE 只说明旧一轮结束；旧上限或当时跳过的位置不能永久挡住后来新增的候选。
+        // 用已落库的段落账本核对当前范围，补缺时仍跳过全部已有段评，且不重置失败预算。
+        if (old?.status == "DONE") {
+            val remaining = done.size < candidateLimit &&
+                ProactiveAnnotationParagraphs.generationBuckets(body, candidateLimit, startAt)
+                    .any { bucket -> bucket.none { it.end in done } }
+            if (!old.canAttempt(remaining)) return
+        }
         // attempts counts completed FAILED generation rounds, not lifecycle/policy/quota interruptions.
         var job = (old ?: ProactiveAnnotationJobEntity(
             bookId = trigger.bookId, chapterIndex = trigger.chapterIndex, personaId = personaId,
@@ -368,12 +391,6 @@ class ProactiveAnnotationScheduler @Inject constructor(
             if (id == -1L) return
             job = job.copy(id = id)
         } else dao.update(job)
-        val done = runCatching {
-            Json.decodeFromString<List<Int>>(job.doneParagraphEnds).toMutableSet().also { ends -> require(ends.all { it >= 0 }) }
-        }.getOrElse {
-            dao.update(job.copy(status = "FAILED", attempts = 2, failureReason = "invalid_paragraph_ledger"))
-            return
-        }
         val round = synchronized(lock) {
             if (!readerContextValid()) return
             rounds.entries.removeAll { it.key != job.id && it.value.trigger == trigger && it.value.personaId == personaId }
@@ -406,12 +423,24 @@ class ProactiveAnnotationScheduler @Inject constructor(
         var outcome = ProactiveAnnotationGenerationResult(failed = false, stopped = true)
         try {
             val limits = initial.limits
+            val entryMode = trigger.timing == ProactiveAnnotationTiming.ON_CHAPTER_ENTRY
+            val visible = synchronized(lock) { lastEntered == trigger }
             outcome = service.generateForChapter(
                 request = ProactiveAnnotationRequest(trigger.bookId, trigger.chapterIndex, body, persona,
-                    if (limits.chapterUnlimited) Int.MAX_VALUE else limits.maxPerChapter, done.toSet(), initial.prompts,
+                    candidateLimit, done.toSet(), initial.prompts,
                     contextBudgetChars = limits.context.budgetChars, startAt = round.startAt,
-                    maxSlotsPerPass = if (trigger.timing == ProactiveAnnotationTiming.ON_CHAPTER_ENTRY && limits.aheadChapters > 0) 1 else Int.MAX_VALUE,
-                    visitedParagraphEnds = round.visitedParagraphEnds.toSet()),
+                    maxSlotsPerPass = when {
+                        !entryMode || limits.aheadChapters <= 0 -> Int.MAX_VALUE
+                        visible -> PROACTIVE_VISIBLE_CHAPTER_SLOTS_PER_PASS
+                        else -> 1
+                    },
+                    visitedParagraphEnds = round.visitedParagraphEnds.toSet(),
+                    readerOffset = if (entryMode) suspend {
+                        val book = try { library.getBook(trigger.bookId) }
+                            catch (cancelled: CancellationException) { throw cancelled }
+                            catch (_: Exception) { null }
+                        book?.takeIf { it.lastReadChapterIndex == trigger.chapterIndex }?.lastReadCharOffset
+                    } else null),
                 allowance = { allowance() },
                 recordMedia = { voices, images ->
                     check(valid()) { "generation_context_changed_before_media_charge" }

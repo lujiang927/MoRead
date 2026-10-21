@@ -7,7 +7,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntSize
 import com.mozhi.reader.core.datastore.ReaderSettings
 import com.mozhi.reader.core.library.EpubLayoutChapterBundle
-import com.mozhi.reader.feature.importer.EpubLayoutDocumentParser
+import com.mozhi.reader.core.epub.EpubLayoutDocumentParser
 import com.mozhi.reader.feature.reader.engine.*
 import com.mozhi.reader.feature.reader.render.ReaderPageStyle
 import com.mozhi.reader.feature.reader.render.SpreadGeometry

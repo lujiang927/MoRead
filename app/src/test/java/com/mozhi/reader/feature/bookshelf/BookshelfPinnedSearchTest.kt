@@ -45,9 +45,9 @@ class BookshelfPinnedSearchTest {
                 val drag = remember { ShelfCollectionDragState() }
                 val state = BookshelfUiState(books = books, allBooks = books, totalBooks = books.size)
                 if (grid) BookGrid(books.map { ShelfEntry.Book(it) }, books.size, state, query, { query = it },
-                    {}, {}, {}, { _, _ -> }, drag, { _, _ -> }, {}, {}, { _, _ -> }, {}, {}, {}, {}, {}, {}, {}, { imports++ })
+                    {}, {}, {}, { _, _ -> }, drag, { _, _ -> }, {}, {}, {}, { _, _ -> }, {}, {}, {}, {}, {}, {}, {}, { imports++ })
                 else BookList(books.map { ShelfEntry.Book(it) }, books.size, state, query, { query = it },
-                    {}, {}, {}, { _, _ -> }, drag, { _, _ -> }, {}, {}, { _, _ -> }, {}, {}, {}, {}, {}, {}, {}, { imports++ })
+                    {}, {}, {}, { _, _ -> }, drag, { _, _ -> }, {}, {}, {}, { _, _ -> }, {}, {}, {}, {}, {}, {}, {}, { imports++ })
             } }
         }
         verify()

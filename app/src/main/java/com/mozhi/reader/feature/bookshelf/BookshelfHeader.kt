@@ -33,6 +33,7 @@ import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Sell
 import androidx.compose.material.icons.outlined.TaskAlt
 import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material.icons.outlined.ViewColumn
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -55,6 +56,8 @@ import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.stringResource
+import com.mozhi.reader.R
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -317,6 +320,7 @@ private fun ReadingNowCard(
 internal fun ShelfHeaderActions(
     state: BookshelfUiState,
     onSetLayout: (ShelfLayout) -> Unit,
+    onSetGridColumns: (Int) -> Unit,
     onSetReadStateFilter: (BookReadState?) -> Unit,
     onSetTagMatchMode: (TagMatchMode) -> Unit,
     onSetReadingOrderAffectsShelf: (Boolean) -> Unit,
@@ -373,6 +377,7 @@ internal fun ShelfHeaderActions(
                     state = state,
                     maxHeight = availableMenuHeight,
                     onSetLayout = onSetLayout,
+                    onSetGridColumns = onSetGridColumns,
                     onSetReadStateFilter = onSetReadStateFilter,
                     onSetTagMatchMode = onSetTagMatchMode,
                     onSetReadingOrderAffectsShelf = onSetReadingOrderAffectsShelf,
@@ -475,6 +480,7 @@ private fun ShelfViewMenu(
     state: BookshelfUiState,
     maxHeight: androidx.compose.ui.unit.Dp,
     onSetLayout: (ShelfLayout) -> Unit,
+    onSetGridColumns: (Int) -> Unit,
     onSetReadStateFilter: (BookReadState?) -> Unit,
     onSetTagMatchMode: (TagMatchMode) -> Unit,
     onSetReadingOrderAffectsShelf: (Boolean) -> Unit,
@@ -513,6 +519,36 @@ private fun ShelfViewMenu(
                 selected = state.layout == ShelfLayout.LIST,
                 onClick = { onSetLayout(ShelfLayout.LIST) }
             )
+        }
+
+        // 只对网格有意义；墨水屏、平板用户常想要比自动更密或更疏的封面墙（issue #16）。
+        if (state.layout == ShelfLayout.GRID) {
+            MoReadMenuExpandableItem(
+                text = stringResource(R.string.shelf_grid_columns),
+                valueText = if (state.gridColumns == 0) {
+                    stringResource(R.string.shelf_grid_columns_auto)
+                } else {
+                    stringResource(R.string.shelf_grid_columns_value, state.gridColumns)
+                },
+                icon = Icons.Outlined.ViewColumn,
+                expanded = section == ShelfMenuSection.COLUMNS,
+                onToggle = { toggle(ShelfMenuSection.COLUMNS) }
+            ) {
+                MoReadMenuItem(
+                    text = stringResource(R.string.shelf_grid_columns_auto_option),
+                    indent = MENU_INDENT,
+                    selected = state.gridColumns == 0,
+                    onClick = { onSetGridColumns(0) }
+                )
+                SHELF_GRID_COLUMN_CHOICES.forEach { columns ->
+                    MoReadMenuItem(
+                        text = stringResource(R.string.shelf_grid_columns_value, columns),
+                        indent = MENU_INDENT,
+                        selected = state.gridColumns == columns,
+                        onClick = { onSetGridColumns(columns) }
+                    )
+                }
+            }
         }
 
         MoReadMenuExpandableItem(
@@ -596,7 +632,9 @@ private fun ShelfViewMenu(
     }
 }
 
-private enum class ShelfMenuSection { LAYOUT, READ_STATE, TAG }
+private enum class ShelfMenuSection { LAYOUT, COLUMNS, READ_STATE, TAG }
+
+private val SHELF_GRID_COLUMN_CHOICES = 3..6
 
 private val MENU_INDENT = 22.dp
 

@@ -30,7 +30,7 @@
 - `ui/components/` 与 `ui/theme/`：共用页面、控件、间距和主题；新增设置页优先复用这里的组件。
 - 设置页复用共用控件的信息层级、间距与主题。`ui/components/MoReadPageDialog` 统一独立整页窗口的背景；它与平板 `NavigationSheet` 共用透明系统栏和主题配置。`ReaderToolPage` 为阅读工具提供固定标题与独立滚动内容。
 - `ui/theme/AppTheme` 的 `AppearanceSettings` 将配色方案、色彩搭配、质感、导航与形状密度分别保存。`ColorSchemes` 提供默认的「纸墨」（暖白纸底、墨色文字、朱砂点睛）、三套莫兰迪日夜色板、原版灰阶及 Android 12+ 壁纸取色；纸墨与原版同属 `isClassic` 外观（玻璃质感、标准形状、悬浮舱）；`MoReadTheme` 统一装配，`Metrics` 提供随密度变化的尺寸。选择方案会套用推荐质感/形状并恢复方案主色；选择「原版」还恢复悬浮舱与默认色彩搭配，明暗和字体保留。
-- `ui/RootDock` / `ui/FloatingRootDock`：手机悬浮导航舱。舱固定靠左、右侧一枚上下文圆钮（`DockAction`：书架是可展开的搜索，伴读页是「新的书库伴读」，统计与设置留空但仍占位），页签宽度由 `dockTabWidth` 按屏宽算出，舱与圆钮不会重叠、跨页不挪位。只有书架随滚动收成一粒（`RootDockState` 只观察根页 NavHost 内已被消费的纵向滚动，`RootDockStateTest`）；搜索词存在 `BookshelfViewModel.searchQuery`，切到其他根页时清空。投影 `floatingGlassShadow` 只画在形状外沿。通栏导航与平板仍在书架内吸顶搜索胶囊。
+- `ui/RootDock` / `ui/FloatingRootDock`：手机悬浮导航舱。舱固定靠左、右侧一枚上下文圆钮（`DockAction`：书架是可展开的搜索，伴读页是「新的书库伴读」，统计与设置没有钮），页签宽度由 `dockTabWidth` 按屏宽算出，舱与圆钮不会重叠；没有钮的页面舱舒展拉满整行（`dockFullTabWidth`），切页时页签宽度弹性过渡、圆钮晚一拍出现。四个根页都随滚动收成一粒（`RootDockState` 只观察根页 NavHost 内已被消费的纵向滚动，`RootDockStateTest`）；选中底是一块弹簧滑动的墨底，页签不各自收手势，由舱统一处理点按与拖拽：按下即拿起一枚玻璃透镜（不等长按），极硬弹簧贴手指滑动、逐格轻震、快滑拉伸，松手切页，收起态点一下先展开（命中与橡皮筋几何在 `DockTabGeometry`；墨底在页签序号空间动画，绘制时由 `DockTrack` 按当前宽度换算，切页伸缩不打断滑动；均见 `DockTabGeometryTest`）；搜索词存在 `BookshelfViewModel.searchQuery`，切到其他根页时清空。投影 `floatingGlassShadow` 只画在形状外沿。通栏导航与平板仍在书架内吸顶搜索胶囊。
 - `ui/BookOpenTransition`：「翻开书」转场。`bookCoverCapture` 记录封面画面与根布局位置，`openBook` 在 `BookOpenOverlay` 里让纸页从封面位置长满屏幕、封面沿书脊翻开，中途进入阅读页后淡出；系统动画时长为 0 时直接进入。入口为书架续读卡与书籍详情的继续阅读。
 - `ui/components/MoReadSurfaces` 统一处理原有玻璃、磨砂与不透明表面及页面背景，浮层不绘制阴影，`MoReadControls` 提供分段、滑条、数字输入（`MoReadNumberRow`，支持「不限」）与胶囊按钮；`SemanticPalettes` 是内置标签与角色配色的公共入口。手机导航支持悬浮舱与通栏，平板保持侧栏；阅读目的地通过 `ReaderAppearanceScope` 保留纸色及原有浮层尺寸。
 - [平板与窗口适配](TABLET_UI.md)：根导航在底部导航、紧凑导航栏与完整侧栏之间切换。`TabletSettingsNavigation` 组织设置分类与详情，`CompanionWorkspace` 为书库和单书聊天复用常驻会话列表，`MoReadDetailLayout` 为书籍详情和听书提供摘要／内容分栏。`NavigationSheet` 统一宽屏侧面板与窄屏底部弹层，避免各功能复制窗口判断。
@@ -64,7 +64,11 @@ Room 结构、迁移、备份版本校验和实际数据文件要保持一致。
 `feature/importer/` 的选择/预览页面与 `ImportCoordinator` 负责用户流程；`core/importer/BookImportGateway` 提供导入入口，后台批量工作通过 WorkManager 执行。
 
 - TXT：`TextEncodingDetector` → `TxtChapterSplitter` / `TxtTocRuleLoader` → 正文存储，不生成 EPUB，`epubPath` 为空；`AiChapterRuleAgent` 提供可选的 AI 分章规则辅助。重新分章按章节索引严格读取正文，还原独立保存的章名；旧生成副本只在全部正文验证通过后移除。
-- EPUB：`EpubPackageInspector`、`EpubMetadataResolver`、`EpubTextExtractor`、`EpubTocMapper` 与 `EpubLayoutDocumentParser` 分别处理包、元信息、文本、目录与布局文档。
+- 批量 TXT 使用流式指纹与解码、`TxtFileText` 的 64 KiB 磁盘缓存和 `TxtChapterRange` 目录索引；内置规则仅扫描短标题行，候选规则不复制正文，自动分节只检查有限窗口。`BookTextWriter.writeSlices` 分块规范化和压缩写入，超长单章也不需要整体载入内存。
+- `LibraryRepository.insertTextBook` 先生成完整正文，再用单次事务发布书籍、章节与目录，避免逐章回写位置及暴露未完成书籍。`BatchImportRunner` 串行执行并保存小型原子检查点，取消保留清单，恢复后继续未完成项；进度通知按阶段和时间节流。多选和文件夹入口保存持久读取授权。`TxtStreamingImportTest`、`TxtAtomicPublicationTest`、`BatchImportRunnerTest` 覆盖文本一致性、发布失败和中断恢复。
+- 单本 TXT 预览同样分块解码；`ImportSessionStore` 保存 UTF-16LE 文件与轻量章节索引，重启恢复、切换规则、AI 规则验证和确认入库都不加载整本正文，兼容迁移旧 UTF-8 会话。单本后台进度共用合并与节流逻辑。`TxtImportStorageTest` 覆盖 65.7 MB 文件的预览、恢复、规则切换和正文一致性，`ImportSessionStoreTest` 覆盖旧会话迁移及失败重试。
+- EPUB：`core/epub/EpubPackageInspector`、`EpubTextExtractor`、`EpubLayoutDocumentParser` 与 `EpubLegacyStyleBridge` 处理包、文本与布局解析；`feature/importer/EpubMetadataResolver`、`EpubTocMapper` 负责导入元信息与目录。`EpubArchiveNormalizer` 在交给 Readium 前规范化导入副本中内容相同的重复 ZIP 条目，源文件和指纹不变。
+- `core/epub/EpubChapterFallback` 共用导入与缓存重建的单章降级策略。精排解析异常时使用文本提取器保留正文及图片锚点，在现有包诊断中记录 `chapter-text-fallback-v1`；缓存淘汰、重启及精排解析恢复后仍遵循已记录的提取路径，核对正文完全一致后走原生普通文本排版。旧书修复逐章核对已存正文，一致时只更新辅助数据，不重写正文；不一致则停止修复。取消、虚拟机错误及正文提取失败不能被当作精排降级吞掉。
 - `core/readium/EpubUriContainer` 为带冒号等特殊资源名的 EPUB 提供 URI 兼容视图：恢复归档条目，并转义清单、目录与文档中的本地引用；原始书包、资源名和正文保持不变，外部 URL 不改写。
 - EPUB 导入复用：`EpubLegacyStyleBridge.newDocumentScope` 在章节间共享不可变 CSS 规则索引，但元素样式缓存按文档隔离；`EpubArchiveImageReader` 直接将图片解析为归档条目，同一导入复用 ZIP 索引与别名映射，结束时关闭。
 - 正文与资源：`core/library/BookTextStore`、`BookTextWriter`、`BookLayoutStore`、`BookMediaStore`。EPUB 导入只保存正文、包/章节索引及字体；`BookLayoutCache` 首次阅读章节时解析 DOM，并以 gzip 存入应用缓存，每本上限 8 MiB、全局 64 MiB。淘汰不影响原书，解析器版本变化只丢弃缓存；读取时核对规范正文，不能因重新解析而移动字符锚点。旧布局在归档可用时转换为单个索引，保留无归档旧库的兼容读法。
@@ -93,7 +97,7 @@ Room 结构、迁移、备份版本校验和实际数据文件要保持一致。
 
 - `ReaderPane` 的分页状态与位图窗口在 `ReaderPaneHolder`，长按选区在 `ReaderSelectionController`，选词工具栏在 `ReaderSelectionToolbar`；滚动模式对应 `ScrollPaneHolder` / `ScrollSelectionController`。
 - [`feature/reader/engine/`](../app/src/main/java/com/mozhi/reader/feature/reader/engine)：文本测量、分页、选区、批注几何与正文控制。
-- [`core/epub/`](../app/src/main/java/com/mozhi/reader/core/epub)：CSS 解析、级联、DOM 适配与样式解析。
+- [`core/epub/`](../app/src/main/java/com/mozhi/reader/core/epub)：EPUB 包检查、正文与布局解析、单章降级，以及 CSS 解析、级联、DOM 适配与样式解析。
 - `engine/EpubBoxLayoutBackend` 与 `engine/epub/`：EPUB 盒树、行内/块布局、分页和排版后端。`EpubLayoutCapability` 记录不支持的布局能力并选择回退（目前只有 vertical-lr）；`EpubDomFragmentLocator` 用 DOM fragment id 定位目录锚点。级联从 `<html>` 开始（`EpubDomChapter.htmlNode`），`html { writing-mode }`、根字号与 `rem` 与浏览器一致。
 - 竖排（`writing-mode: vertical-rl`）不另写引擎：`engine/epub/EpubVerticalFrame` 把物理盒属性（四边、圆角、宽高、阴影、定位偏移）映射到顺时针旋转 90° 的坐标系，整章仍由横排引擎排版分页，行即物理上的列。`TextPage.verticalFrameWidth` 标记竖排页，`physicalToFrame` / `frameToPhysical`（`engine/VerticalPageGeometry`）是命中、选区、手柄和批注几何进出旋转坐标系的唯一入口。字向按 UAX #50（`engine/VerticalOrientation`，由 Unicode 数据生成）：直立字形用字体的 `vert` 替换，字体没有时退到 Unicode 竖排标点（`VerticalForms`），再没有才侧转；`text-orientation`、`text-combine-upright`（縦中横）在行内布局落到 `TextColumn`。渲染器只旋转画布，并在各自位置把直立字、图片、背景图和渐变转回物理方向；页面背景在旋转前绘制。竖排页的翻页方向为从右往左：`PageTurnDriver.mirrorProvider` 在镜像空间里处理手势，`ReaderPane` 镜像合成帧并预翻转页图，所有翻页动画共用同一套几何。滚动模式下竖排页按整屏条带拼接。回归见 `EpubVerticalWritingTest`、`VerticalOrientationTest` 与 `ReaderPageTouchTest`。
 - CSS 细节：`CssGradientParser` 解析 `linear-/radial-gradient` 及 `repeating-` 形式（含多层 `background` 取最上层有图的一层）；`border-*-style` 的 dashed/dotted/double/groove/ridge/inset/outset、`text-shadow`、`white-space: nowrap`、`position: relative/absolute`（相对最近的定位祖先，含 `transform: translate()`）进入样式与页面模型。绝对定位的行按文档序插入输出，保持 text.mz 坐标单调。边框描边落在边框盒内侧；`body` 背景图按 `background-size/repeat/position` 铺开（`TextPage.backgroundLayer`）。回归见 `CssEffectsParserTest`、`EpubCssEffectsLayoutTest`。
@@ -177,8 +181,9 @@ Room 结构、迁移、备份版本校验和实际数据文件要保持一致。
 | 主动行为 | `core/datastore/CompanionAutonomySettings`、`ProactiveAnnotationLimits` / `Quota` / `ProactiveAnnotationContextSettings` 与 `ai/companion/ProactiveAnnotationService` / `ProactiveAnnotationContext` |
 | 媒体与听书 | `ai/media/`、`ai/listen/`、`ai/audiobook/`；缓存、TTS 设置与系统引擎位于 `core/speech/` |
 
-- 默认聊天外观下角色的话不装气泡（`ChatBubbleStyle.inline`），正文与互动岛直接排在页面上、与角色名对齐；自定义了气泡形状或底色的角色仍画气泡。脚注来源以引文卡呈现。段落讨论弹层按「页边批注」排版：原文是宋体摘录块（按实际划线样式绘制、样式与颜色就地可改），讨论用界面黑体挂在一根竖线上，回复缩进一级。
+- 默认聊天外观下角色的话不装气泡（`ChatBubbleStyle.inline`），正文与互动岛直接排在页面上、与角色名对齐；自定义了气泡形状或底色的角色仍画气泡。脚注来源以引文卡呈现。段落讨论弹层按「页边批注」排版，讨论是视觉主体：原文是比讨论小一档的宋体摘录块（按实际划线样式绘制，默认折三行、点击展开），样式与颜色收在「原文」小标行末的样式钮里、点开后就地可改；讨论用更大一号的界面黑体挂在一根竖线上，回复缩进一级。
 - 互动回答：`ai/genui/` 解析模型输出的 DIL 文档并编译为可恢复的界面程序，`runtime/GenUiEngine` / `GenUiSession` 通过 QuickJS 执行，`ui/genui/GenUiHost` / `GenUiRenderer` 将界面树渲染为原生 Compose 控件。`feature/reader/CompanionGenUi` 接入消息展示、会话状态和动作；`core/datastore/CompanionGenUiSettings` 保存生成级别、样式、图片与运行策略。图片默认点按生成，运行时不提供 DOM 或直接网络访问。回归入口为 `GenUiCompilerTest`、`GenUiEngineTest`、`GenUiJniKeepRulesTest`、`GenUiContrastTest` 和设备端 `GenUiAndroidRuntimeTest`。
+- 对话导出：会话历史弹层（`CompanionConversationSheet`，书内与书库伴读共用）每行的导出按钮打开 `ConversationExportDialog`，把整段会话导出为 Markdown，可分享或经系统文件选择器保存（无需存储权限）。`ConversationTranscript.buildConversationMarkdown` 是纯函数：只导出用户与 AI 发言，AI 回复复用 `parseCompanionParts` 去掉气泡与语音标记、互动界面取文字投影，可选附上思考过程与工具名，不导出工具结果原文。回归见 `ConversationTranscriptTest`。
 
 **边界：**AI 读取书籍内容必须遵守阅读进度范围；新增工具应同时检查路由、权限和纯函数测试。会调用外部服务的自动行为应有明确设置和费用提示。对话呈现优先在 `CompanionMessageParts`、`CompanionChatList`、`CompanionProcessCard`、`CompanionComposer` 各自职责内修改，不要把解析规则堆入 Composable。
 
@@ -250,6 +255,7 @@ EPUB 兼容回归包括 `EpubImportCompatibilityTest`（资源 URI 与目录）�
 | 排版与导入 | `EpubLegacyStyleBridgeTest`、`EpubArchiveImageReaderTest`、`EpubDomFragmentLocatorTest`、`EpubLayoutCapabilityTest`、`ImmersiveArtworkFitTest` 与对应引擎测试；真实样书与设备阅读回归 |
 | 布局压缩兼容 | `BookLayoutStoreTest`、`GzipTextFilesTest`：旧索引、明文/gzip 混合、缺失或损坏文件、重试及新导入 |
 | 按需布局与归档图片 | `BookLayoutArchiveCacheTest`、`BookMediaArchiveTest`、`EpubImportPipelineTest`：缓存淘汰/版本、正文坐标、归档 PNG/SVG 渲染、旧副本校验和缺省 schema |
+| 单章精排降级 | `EpubChapterFallbackTest`、`EpubChapterFallbackImportTest`、`BookLayoutArchiveCacheTest`：整本导入、图片锚点、取消、提取失败、缓存淘汰与重启后的正文一致性 |
 | 书籍详情配色 | `CoverPaletteTest`、`BookDetailVisualTest`（生成的封面、日夜两色与无封面回退） |
 | 阅读统计 | `StatsViewModelTest`、`StatsSettingsStoreTest`、`StatsScreenVisualTest`、`ReadingTimeSlicesTest`、`BookStorageAndTimeMigrationTest`：周期聚合、整月封面数据、跨周/年连续阅读区间、组件持久化、大格热力、真实日期/时间线弹层、跨午夜/夏令时及历史数据迁移 |
 | 页面切换稳定性 | `NavigationMotionTest`、`NavigationStabilityTest`、`BookDetailNavigationTest`：真实 NavHost 内逐帧检查根页不缩放、阅读返回的系统栏留白与列表锚点、书籍详情标题与正文位置、宽屏视口、Dock 退场选中态和快速切页恢复 |
@@ -279,7 +285,7 @@ Compose 使用 `stringResource` / `pluralStringResource`。资源命名、占位
 - `MainActivity.acceptFileIntent` 在书籍导入前将 MDX 路由到词典管理；`LocalDictionaryRepository.supportsMdx` 识别文档显示名称、本地文件 URI 与 MDX MIME。`ExternalDictionaryOpenTest` 覆盖系统选择器解析、扩展名大小写、文件导入及损坏文件不发布。
 
 - `ui/WindowLayout.kt` 按真实窗口约束区分布局。窗口达到 840dp 使用侧边导航；`ShelfGridLayout.kt` 让书架和合集按可用宽度选择列数，拖拽坐标始终在同一坐标系中换算。
-- `ui/MoReadTabletSidebar` 为宽窗口提供常驻书库导航，与书架共用 `BookshelfViewModel` 的阅读状态、分组和标签筛选；侧栏独立滚动。`TabletBookshelfComponents` 提供最近在读和局部搜索，视图切换仍只在右上角原有菜单中；封面按实际内容宽度排成 2～6 列，窄窗口沿用手机布局。手机和平板的书籍、合集列表行都直接排列在画布上，以细分隔线区分，不再逐行包裹圆角卡片。`TabletBookshelfVisualTest` 覆盖横竖屏、深色、筛选、窗口缩放、后台刷新和截图。
+- `ui/MoReadTabletSidebar` 为宽窗口提供常驻书库导航，与书架共用 `BookshelfViewModel` 的阅读状态、分组和标签筛选；侧栏独立滚动。`TabletBookshelfComponents` 提供最近在读和局部搜索，视图切换仍只在右上角原有菜单中；封面按实际内容宽度排成 3～6 列（导航条窗口固定 3 列，侧栏窗口按 132dp 最小格；窗口变宽列数只增不减，`ShelfGridLayoutTest` 逐 dp 校验），窄窗口沿用手机布局。视图菜单的「每行本数」（`ReaderSettings.shelfGridColumns`，0 为自动、3～6 为手动）同时作用于书架与合集详情，窄容器里逐列让步，封面不窄于 56dp。手机和平板的书籍、合集列表行都直接排列在画布上，以细分隔线区分，不再逐行包裹圆角卡片。`TabletBookshelfVisualTest` 覆盖横竖屏、深色、筛选、窗口缩放、后台刷新和截图。
 - `ReaderCompanionLayout.kt` 保持正文的组合位置稳定，按需在右侧嵌入同一个阅读页 ViewModel 的 `CompanionChatPane`。窗口缩窄时隐藏侧栏，但保留用户偏好和聊天会话。
 - `ReaderPaneHolder` 和 `ScrollPaneHolder` 由阅读页 ViewModel 持有；进入全屏聊天只解绑 UI 回调，返回时复用分页三页位图或滚动章节条带、字体与排版。字体、视口、安全区或阅读模式变化必须重新校验排版环境，主题、批注和背景变化必须使绘制缓存失效。
 - `ReaderSafeInsets` 在分页与滚动阅读中共用稳定系统栏和显示切口安全区；沉浸模式只隐藏状态栏，不清零顶部留白，显示/隐藏动画不触发无意义重排。
@@ -288,8 +294,8 @@ Compose 使用 `stringResource` / `pluralStringResource`。资源命名、占位
 - 段评引起的重排只影响实际改变的章节；替换布局就绪前保留旧布局。翻页提交校验布局代次，加载失败不能当作空章继续翻动。
 - `AgentLoop.RoundStarted` 和 `MessageEntity.clientRoundId` 在持久化之前确定气泡身份；`CompanionStreamingReducer` 的状态由 Main 线程串行管理，Room 与流事件的到达顺序不应改变列表 key。
 - 生图/TTS 配置用 `CommittedTextFieldState` 保留本地选择区和输入法组合态，失焦或操作前提交；`SettingsWriteQueue` 顺序保存并提供 flush 屏障，存储回声不覆盖正在输入的草稿。
-- `ProactiveAnnotationScheduler` 是全应用唯一的有界串行生成入口。`ProactiveAnnotationJobEntity` 按书籍、章节、角色和正文修订版持久去重；段落结果与已完成段落账本在同一 Room 事务中落库。
-- `ProactiveAnnotationParagraphs` 在本地选择段落；生成请求接收截至目标段落的本章前缀，以及 `ProactiveAnnotationContext` 从严格前文章节检索的相关原文和有效梗概。检索复用本地 BM25，不增加模型调用；梗概须同时通过正文修订版、来源范围与原文哈希校验，正文变化后停止旧请求。`AnnotationVisibility.forDisplay` 只遵守用户的 AI 批注显示开关，已保存段评在正文、详情、回顾和完成提示中立即可查看，讨论不要求先读到原文。自动聊天上下文和查询工具仍检查来源范围；预生成不修改阅读水位。开启提前章节时，每轮按角色处理一个候选段落后轮到其他章节，防止本章不限条数阻塞下一章；同轮失败候选只在完整一轮结束后参加最多两轮的重试，前文上下文缓存复用并校验正文修订版。
+- `ProactiveAnnotationScheduler` 是全应用唯一的有界串行生成入口。`ProactiveAnnotationJobEntity` 按书籍、章节、角色和正文修订版持久去重；段落结果与已完成段落账本在同一 Room 事务中落库。旧轮次标记 `DONE` 后仍须核对当前条数上限与可生成范围；调高上限或重访此前跳过的范围时，只补缺失候选，保留成功账本与失败重试预算。
+- `ProactiveAnnotationParagraphs` 在本地选择段落；生成请求接收截至目标段落的本章前缀，以及 `ProactiveAnnotationContext` 从严格前文章节检索的相关原文和有效梗概。检索复用本地 BM25，不增加模型调用；梗概须同时通过正文修订版、来源范围与原文哈希校验，正文变化后停止旧请求。`AnnotationVisibility.forDisplay` 只遵守用户的 AI 批注显示开关，已保存段评在正文、详情、回顾和完成提示中立即可查看，讨论不要求先读到原文。自动聊天上下文和查询工具仍检查来源范围；预生成不修改阅读水位。开启提前章节时，正在阅读的章节每轮按角色处理至多 3 个候选段落（`PROACTIVE_VISIBLE_CHAPTER_SLOTS_PER_PASS`），预生成章节每轮 1 个，随后轮到其他章节，防止本章不限条数阻塞下一章；进入章节模式下每个候选开工前重读阅读进度，读者已翻过的候选直接跳过（不计失败），调用留给前方未读段落；同轮失败候选只在完整一轮结束后参加最多两轮的重试，前文上下文缓存复用并校验正文修订版。
 - 段评目标按句切成 200 字以内的小块，降低目标跨页导致引文所在页看不到段评的概率。进入章节生成时从读者当前页之后选段。每格正选输出无法解析或引文无法定位时，改用同格次选；超时和请求错误不换段。引文只在目标内用 `QuoteMatcher.bestOverlap` 定位，失败原因写入日志 `ProactiveAnnotation`（不含正文）。
 - `ProactiveAnnotationContextSettings` 提供省流 8,000、均衡 16,000、充分 32,000 字符及 4,000～64,000 自定义预算，默认均衡。预算覆盖本章正文（含单独重复的目标段落）、前文片段与梗概，不含角色设定和写作提示词；全局与单书覆盖共用设置页，修改预算会让在途任务失效。
 - `AnnotationDiscussionService` 固定提供只读书内查询工具，不再按发言关键词裁剪。模型可先搜索再回读核对，独立循环最多五轮；提示词与工具共用实际 `ReadingScope`。记忆检索同时遵守全局/角色开关、当前用户面具与跨书对话开关，段评讨论仍不写入聊天记忆。
@@ -299,7 +305,7 @@ Compose 使用 `stringResource` / `pluralStringResource`。资源命名、占位
 - 回退诊断只记录超时、错误类型和输出长度，不记录模型原文、角色资料或异常消息里的连接信息。
 - 随读段评设置复用父页面的 `SettingsViewModel`，冷启动先显示稳定页面框架，真实设置加载前不渲染临时默认开关和滑块。
 - `CompanionAutonomySettings` 保存多伴读选择和独立段评预设。未单独选角色时跟随当前伴读；多选时按角色分别去重、共享每日额度并预留后续角色份额。`AnnotationPromptSettingsScreen` 复用预设编辑器，支持多条开关、编辑和四种注入位置；`ProactiveAnnotationPrompts` 提供可修改的内置口吻与划线风格，原文定位及输出格式契约独立保留。
-- 主动段评通过 `ModelRole.PROACTIVE_ANNOTATION` 分配，未配置时只回落 `CHEAP`，已配置模型的错误不会暗中切换模型。每章“不限制”按全部候选段落生成，没有固定 10 条限制；有限条数按原文字符位置分布。`ProactiveAnnotationParagraphs` 拆分超长段落，保留 UTF-16 边界并限制上下文只到目标结尾；每日限额与已完成段落去重仍适用；已保存段评立即可查看。
+- 主动段评通过 `ModelRole.PROACTIVE_ANNOTATION` 分配，未配置时只回落 `CHEAP`，已配置模型的错误不会暗中切换模型。每章“不限制”按全部候选段落生成，没有固定 10 条限制；`ProactiveAnnotationParagraphs.generationBuckets` 按约 800 原文字符的区间轮流取段，先覆盖全章再补各区间剩余段落，避免未完成的预生成只覆盖前几页。切片续跑固定本轮起点与分组，去重或翻页不重排区间；有限条数仍按原文字符位置分布。`ProactiveAnnotationParagraphs` 拆分超长段落，保留 UTF-16 边界并限制上下文只到目标结尾；每日限额与已完成段落去重仍适用；已保存段评立即可查看。
 
 对应回归测试位于 `feature/reader/*Spread*Test`、`engine/ReaderContentControllerTest`、`CompanionChat*Test`、`ReaderPaneRetentionTest`、`settings/ProactiveAnnotationSettingsScreenTest`、`core/retrieval/AnnotationVisibilityTest`、`ai/companion/`、`ui/WindowLayoutTest` 和数据库迁移/可见水位的 Android 测试中。
 

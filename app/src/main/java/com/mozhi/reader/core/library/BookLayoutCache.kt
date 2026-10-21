@@ -2,7 +2,8 @@ package com.mozhi.reader.core.library
 
 import android.content.Context
 import com.mozhi.reader.core.epub.dom.EpubDomChapter
-import com.mozhi.reader.feature.importer.EpubLayoutDocumentParser
+import com.mozhi.reader.core.epub.EpubLayoutDocumentParser
+import com.mozhi.reader.core.epub.EpubChapterFallback
 import java.io.File
 import java.security.MessageDigest
 import kotlinx.coroutines.CancellationException
@@ -30,6 +31,9 @@ internal class BookLayoutCache(
     ): Pair<EpubLayoutChapter, EpubDomChapter>? = locks[(bookId and 15).toInt()].withLock {
         val archive = pkg.sourceArchive?.let { resolveArchivePath(context.filesDir, it) } ?: return@withLock null
         val sourceKey = "${archive.absolutePath}:${archive.length()}:${archive.lastModified()}"
+        val recordedFallback = pkg.diagnostics.firstOrNull {
+            it.code == EpubChapterFallback.DIAGNOSTIC_CODE && it.href == reference.href
+        }
         val root = directory(bookId).apply { mkdirs() }
         val file = File(root, "p${EpubLayoutPackage.CURRENT_PARSER_REVISION}-ch-${reference.chapterIndex}.json.gz")
         val expectedHash = expectedText?.let(::textHash)
@@ -40,10 +44,10 @@ internal class BookLayoutCache(
             cached.sourceKey == sourceKey && cached.dom.schemaVersion == EpubDomChapter.CURRENT_SCHEMA_VERSION &&
             cached.dom.chapterIndex == reference.chapterIndex && cached.dom.href == reference.href &&
             cached.document.chapterIndex == reference.chapterIndex && cached.document.textLength == reference.textLength &&
-            cached.dom.textLength == reference.textLength && (expectedHash == null || cached.textHash == expectedHash)
+            cached.dom.textLength == reference.textLength && (expectedHash == null || cached.textHash == expectedHash) &&
+            (recordedFallback == null || EpubChapterFallback.isTextFallback(cached.document))
         ) {
             file.setLastModified(System.currentTimeMillis())
-            trim(bookId)
             return@withLock cached.document to cached.dom
         }
         file.delete()
@@ -52,7 +56,8 @@ internal class BookLayoutCache(
         val bytes = EpubArchivePool().use { it.read(EpubArchiveAsset(archive, archivePath), MAX_CHAPTER_BYTES) }
             ?: return@withLock null
         val parsed = try {
-            parser.parseWithText(bytes, reference.chapterIndex, reference.href, pkg.stylesheets.associate { it.href to it.css })
+            EpubChapterFallback.parse(parser, bytes, reference.chapterIndex, reference.href,
+                pkg.stylesheets.associate { it.href to it.css }, recordedFallback = recordedFallback)
         } catch (error: Exception) {
             if (error is CancellationException) throw error
             return@withLock null
@@ -79,10 +84,15 @@ internal class BookLayoutCache(
 
     fun trim(bookId: Long) = synchronized(trimLock) {
         fun prune(files: List<File>, budget: Long) {
-            var bytes = files.sumOf(File::length)
-            for (file in files.sortedBy(File::lastModified)) {
+            val sizes = files.map { it to it.length() }
+            var bytes = sizes.sumOf { it.second }
+            if (bytes <= budget) return
+            // Snapshot metadata once. A File.lastModified() comparator caused filesystem I/O
+            // on every sort comparison, even for caches that did not need eviction.
+            val oldest = sizes.map { (file, size) -> Triple(file, size, file.lastModified()) }
+                .sortedBy { it.third }
+            for ((file, size) in oldest) {
                 if (bytes <= budget) break
-                val size = file.length()
                 if (file.delete()) bytes -= size
             }
         }

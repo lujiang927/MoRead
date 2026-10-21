@@ -57,4 +57,23 @@ class AiChapterRuleAgentTest {
         assertTrue(valid is AiChapterRuleValidation.Valid)
         assertTrue(invalid is AiChapterRuleValidation.Invalid)
     }
+
+    @Test
+    fun `sampling and validation never materialize a file backed book or chapter body`() {
+        val text = (1..8).joinToString("\n") { "第${it}章 标题\n${"正文。".repeat(20_000)}" }
+        val source = object : CharSequence {
+            override val length = text.length
+            override fun get(index: Int) = text[index]
+            override fun subSequence(startIndex: Int, endIndex: Int): CharSequence {
+                check(endIndex - startIndex <= 4_000) { "Whole body copied" }
+                return text.subSequence(startIndex, endIndex)
+            }
+            override fun toString(): String = error("Whole book copied")
+        }
+        assertTrue(AiChapterRuleSampler.sample(source).contains("位置 50%"))
+        val result = AiChapterRuleValidator.validate(source, "^第\\d+章.*$", splitter)
+        assertTrue(result is AiChapterRuleValidation.Valid)
+        assertEquals(8, (result as AiChapterRuleValidation.Valid).result.chapters.size)
+        assertTrue(AiChapterRuleValidator.validate(source, "^.*$", splitter) is AiChapterRuleValidation.Invalid)
+    }
 }

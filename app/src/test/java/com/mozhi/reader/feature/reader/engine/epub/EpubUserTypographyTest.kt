@@ -5,7 +5,7 @@ import android.graphics.Typeface
 import com.mozhi.reader.core.datastore.PublisherStyleMode
 import com.mozhi.reader.core.library.EpubLayoutChapterBundle
 import com.mozhi.reader.core.library.EpubStylesheetText
-import com.mozhi.reader.feature.importer.EpubLayoutDocumentParser
+import com.mozhi.reader.core.epub.EpubLayoutDocumentParser
 import com.mozhi.reader.feature.reader.engine.AndroidTextMeasure
 import com.mozhi.reader.feature.reader.engine.ChapterTypesetter
 import com.mozhi.reader.feature.reader.engine.TextLine

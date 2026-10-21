@@ -8,6 +8,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
@@ -260,10 +261,12 @@ class ReaderKnowledgeVisualTest {
             selectTab(tab)
             val target = compose.onNodeWithTag(list)
             target.performScrollToIndex(0)
+            assertBoundaryDuringDrag(target, 42f, sheetTop, tabsTop)
             repeat(3) { target.performTouchInput { swipeDown(durationMillis = 160) } }
             assertEquals(sheetTop, top("navigation-viewport"), 0.5f)
             assertEquals(tabsTop, top("knowledge-tabs"), 0.5f)
             target.performScrollToIndex(39)
+            assertBoundaryDuringDrag(target, -42f, sheetTop, tabsTop)
             repeat(3) { target.performTouchInput { swipeUp(durationMillis = 120) } }
             assertEquals(sheetTop, top("navigation-viewport"), 0.5f)
             assertEquals(tabsTop, top("knowledge-tabs"), 0.5f)
@@ -395,6 +398,16 @@ class ReaderKnowledgeVisualTest {
     }
 
     private fun selectTab(label: String) { compose.onNode(hasText(label) and hasClickAction()).performClick() }
+    private fun assertBoundaryDuringDrag(target: SemanticsNodeInteraction, delta: Float, sheetTop: Float, tabsTop: Float) {
+        target.performTouchInput { down(center) }
+        repeat(4) {
+            target.performTouchInput { moveBy(Offset(0f, delta), delayMillis = 32) }
+            assertEquals("拖动过程中弹层不能位移", sheetTop, top("navigation-viewport"), .5f)
+            assertEquals("拖动过程中页签不能位移", tabsTop, top("knowledge-tabs"), .5f)
+            assertEquals(root.height.toFloat(), compose.onNodeWithTag("navigation-viewport").fetchSemanticsNode().boundsInRoot.bottom, 1f)
+        }
+        target.performTouchInput { up() }
+    }
     private fun top(tag: String): Float = compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot.top
     private fun scroll(tag: String): Float = compose.onNodeWithTag(tag).fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value()
 

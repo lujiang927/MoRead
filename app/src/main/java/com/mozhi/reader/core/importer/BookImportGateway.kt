@@ -23,6 +23,10 @@ interface BookImportGateway {
      */
     suspend fun importDirectly(uri: Uri): Long
 
+    /** Per-book stages, throttled by the worker before notifying WorkManager/UI. */
+    suspend fun importDirectly(uri: Uri, onProgress: (message: String, completed: Int, total: Int) -> Unit): Long =
+        importDirectly(uri)
+
     suspend fun backfillMissingCovers()
 
     /** Rebuilds hierarchical EPUB navigation for books imported before it was persisted. */

@@ -1,7 +1,7 @@
 package com.mozhi.reader.feature.reader.engine.epub
 
-import com.mozhi.reader.feature.importer.EpubLayoutDocumentParser
-import com.mozhi.reader.feature.importer.ParsedEpubLayoutChapter
+import com.mozhi.reader.core.epub.EpubLayoutDocumentParser
+import com.mozhi.reader.core.epub.ParsedEpubLayoutChapter
 import java.io.File
 
 internal object FineLayoutFixtures {

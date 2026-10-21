@@ -1,5 +1,7 @@
 package com.mozhi.reader.feature.importer
 
+import com.mozhi.reader.core.epub.EpubPackageInspector
+import com.mozhi.reader.core.epub.EpubTextExtractor
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.mozhi.reader.core.readium.ReadiumServices

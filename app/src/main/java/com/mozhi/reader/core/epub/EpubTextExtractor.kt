@@ -1,4 +1,4 @@
-package com.mozhi.reader.feature.importer
+package com.mozhi.reader.core.epub
 
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets

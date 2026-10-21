@@ -38,7 +38,9 @@ internal fun CompanionVoiceBubble(
     palette: ReaderPalette,
     onPrepare: () -> Unit,
     onRegenerate: () -> Unit,
-    onPlay: (String) -> Unit
+    onPlay: (String) -> Unit,
+    /** 展开后的文字怎么画；不给就用一行小号纯文本。 */
+    expandedContent: (@Composable () -> Unit)? = null
 ) {
     var expanded by remember(text) { mutableStateOf(false) }
     LaunchedEffect(text) { onPrepare() }
@@ -68,6 +70,7 @@ internal fun CompanionVoiceBubble(
                 modifier = Modifier
                     .weight(1f)
                     .height(30.dp)
+                    .clickable { expanded = !expanded }
                     .padding(horizontal = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -100,11 +103,15 @@ internal fun CompanionVoiceBubble(
             )
         }
         if (expanded) {
-            Text(
-                text,
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
-            )
+            if (expandedContent != null) {
+                Column(Modifier.fillMaxWidth().padding(top = 6.dp)) { expandedContent() }
+            } else {
+                Text(
+                    text,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
+                )
+            }
         }
     }
 }

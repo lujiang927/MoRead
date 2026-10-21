@@ -1027,10 +1027,11 @@ fun ReaderScreen(
                 modifier = Modifier.align(Alignment.TopCenter).padding(top = 44.dp, start = 16.dp, end = 16.dp)
             )
         }
+        val companionOrbVisible by companionViewModel.orbVisible.collectAsStateWithLifecycle()
         DraggableCompanionOrb(
             persona = companionState.activePersona,
             palette = palette,
-            visible = !screenState.detailsVisible && contentVisible,
+            visible = companionOrbVisible == true && !screenState.detailsVisible && contentVisible,
             onClick = openCompanion,
             interactionSignal = state.currentChapterIndex * 10_000 + state.pageIndex
         )

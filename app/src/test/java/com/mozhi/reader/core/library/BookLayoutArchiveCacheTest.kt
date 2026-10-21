@@ -2,7 +2,9 @@ package com.mozhi.reader.core.library
 
 import android.content.Context
 import com.mozhi.reader.core.epub.dom.EpubDomChapter
-import com.mozhi.reader.feature.importer.EpubLayoutDocumentParser
+import com.mozhi.reader.core.epub.EpubLayoutDocumentParser
+import com.mozhi.reader.core.epub.EpubChapterFallback
+import com.mozhi.reader.core.epub.EpubTextExtractor
 import io.mockk.every
 import io.mockk.mockk
 import java.io.File
@@ -112,5 +114,57 @@ class BookLayoutArchiveCacheTest {
         val json = "{\"chapterIndex\":0,\"href\":\"chapter.xhtml\",\"bodyNode\":{\"tag\":\"body\"},\"textLength\":0}"
         assertThrows(SerializationException::class.java) { Json.decodeFromString<EpubDomChapter>(json) }
         assertThrows(SerializationException::class.java) { Json.decodeFromString<EpubLayoutPackage>("{\"packageDocumentPath\":\"content.opf\"}") }
+    }
+
+    @Test fun fallbackSurvivesCacheEvictionRestartAndParserRecoveryWithoutMovingTextAnchors() = runTest {
+        val bytes = "<html><head><link rel='stylesheet' href='book.css'/></head><body><span>甲🙂</span><span>乙</span><img src='art.png'/></body></html>".toByteArray()
+        val styles = listOf(EpubStylesheetText("OPS/book.css", "span { display: block; }"))
+        val stylesheetMap = styles.associate { it.href to it.css }
+        val canonical = EpubTextExtractor().extractWithImages(bytes, href).text
+        assertNotEquals(canonical, parser.parseWithText(bytes, 0, href, stylesheetMap).text)
+        val failing = mockk<EpubLayoutDocumentParser>()
+        every { failing.parseWithText(any(), any(), any(), any()) } throws IllegalArgumentException("style failure")
+        val imported = EpubChapterFallback.parse(failing, bytes, 0, href, stylesheetMap)
+        val epub = File(context.filesDir, "books/fallback.epub").apply {
+            parentFile?.mkdirs()
+            ZipOutputStream(outputStream()).use { zip ->
+                zip.putNextEntry(ZipEntry(href)); zip.write(bytes); zip.closeEntry()
+            }
+        }
+        val store = BookLayoutStore(context)
+        store.initialize(1, epub, pkg().copy(stylesheets = styles),
+            listOf(EpubLayoutChapterInput(0, href, imported.document)))
+        val index = File(context.filesDir, "book-layout/1/${BookLayoutStore.INDEX_FILE}").readText()
+        assertTrue(index.contains(EpubChapterFallback.DIAGNOSTIC_CODE))
+        val before = Json.decodeFromString<EpubLayoutPackage>(index)
+        assertEquals(EpubLayoutPackage.CURRENT_SCHEMA_VERSION, before.schemaVersion)
+        repeat(2) {
+            val restarted = BookLayoutStore(context) // A healthy rich parser must still honor the saved fallback.
+            val bundle = restarted.readChapter(1, 0, canonical)!!
+            assertTrue(EpubChapterFallback.isTextFallback(bundle.document))
+            assertEquals(canonical.length, bundle.document.textLength)
+            assertTrue(bundle.document.blocks.isEmpty())
+            assertNull(bundle.dom)
+            assertTrue(bundle.stylesheets.isEmpty()) // Global CSS cannot accidentally route to an empty rich DOM.
+            assertNull(restarted.readChapter(1, 0, "错".repeat(canonical.length)))
+            cache().deleteRecursively()
+            assertNull(BookLayoutStore(context).readChapter(1, 0, "错".repeat(canonical.length)))
+        }
+        assertEquals(index, File(context.filesDir, "book-layout/1/${BookLayoutStore.INDEX_FILE}").readText())
+        assertTrue(store.hasCurrentLayout(1, listOf(canonical.length)))
+    }
+
+    @Test fun oldBooksDoNotAdoptDifferentTextWhenRichRebuildFails() = runTest {
+        val value = parsed
+        val store = BookLayoutStore(context)
+        store.initialize(1, archive(), pkg(), listOf(EpubLayoutChapterInput(0, href, value.document)))
+        val failing = mockk<EpubLayoutDocumentParser>()
+        every { failing.parseWithText(any(), any(), any(), any()) } throws IllegalArgumentException("new parser failure")
+        val reader = BookLayoutStore(context, failing)
+        val preserved = value.text.replace('雨', '雪')
+        assertEquals(value.text.length, preserved.length)
+        assertNull(reader.readChapter(1, 0, preserved))
+        assertTrue(reader.hasCurrentLayout(1, listOf(preserved.length)))
+        assertTrue(EpubChapterFallback.isTextFallback(reader.readChapter(1, 0, value.text)!!.document))
     }
 }

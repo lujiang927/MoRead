@@ -208,6 +208,14 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { readerSettingsRepository.setCompanionGenUi(value) }
     }
 
+    /** 阅读页伴读悬浮球；同 [genUiSettings] 独立成流。 */
+    val companionOrbVisible: StateFlow<Boolean> =
+        readerSettingsRepository.companionOrbVisible.stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
+    fun setCompanionOrbVisible(visible: Boolean) {
+        viewModelScope.launch { readerSettingsRepository.setCompanionOrbVisible(visible) }
+    }
+
     fun assignModel(role: ModelRole, modelId: Long?) {
         viewModelScope.launch {
             runCatching { providerRepository.assign(role, modelId) }

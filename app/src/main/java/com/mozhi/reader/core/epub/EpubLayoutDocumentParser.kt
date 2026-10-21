@@ -1,4 +1,4 @@
-package com.mozhi.reader.feature.importer
+package com.mozhi.reader.core.epub
 
 import com.mozhi.reader.core.epub.dom.EpubDomChapter
 import com.mozhi.reader.core.epub.dom.EpubDomNode

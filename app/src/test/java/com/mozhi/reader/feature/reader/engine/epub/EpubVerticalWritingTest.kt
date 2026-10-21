@@ -7,7 +7,7 @@ import com.mozhi.reader.core.epub.style.EpubWritingMode
 import com.mozhi.reader.core.epub.style.ResolvedLength
 import com.mozhi.reader.core.library.EpubLayoutChapterBundle
 import com.mozhi.reader.core.library.EpubStylesheetText
-import com.mozhi.reader.feature.importer.EpubLayoutDocumentParser
+import com.mozhi.reader.core.epub.EpubLayoutDocumentParser
 import com.mozhi.reader.feature.reader.engine.ChapterTypesetter
 import com.mozhi.reader.feature.reader.engine.FakeMeasure
 import com.mozhi.reader.feature.reader.engine.SelectionRect

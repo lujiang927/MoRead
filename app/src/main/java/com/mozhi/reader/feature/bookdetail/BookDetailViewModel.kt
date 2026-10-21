@@ -44,10 +44,14 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -80,10 +84,10 @@ data class BookDetailUiState(
     val isLoading: Boolean = true,
     val isWorking: Boolean = false
 ) {
-    val selectedTags: List<BookTagEntity>
-        get() = shelfTags.filter { tag ->
-            shelfTagRefs.any { ref -> ref.bookId == book?.id && ref.tagId == tag.id }
-        }
+    val selectedTags: List<BookTagEntity> by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        val ids = shelfTagRefs.asSequence().filter { it.bookId == book?.id }.map { it.tagId }.toSet()
+        shelfTags.filter { it.id in ids }
+    }
 
     val selectedGroupName: String
         get() = shelfGroups.firstOrNull { it.id == book?.groupId }?.name ?: "未分组"
@@ -139,9 +143,14 @@ class BookDetailViewModel @Inject constructor(
         val personaNames: Map<Long, String>
     )
 
+    private val bookFlow = libraryRepository.observeBook(bookId)
+        .shareIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), replay = 1)
+    private val chaptersFlow = libraryRepository.observeChapters(bookId)
+        .shareIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), replay = 1)
+
     private val libraryContent = combine(
-        libraryRepository.observeBook(bookId),
-        libraryRepository.observeChapters(bookId),
+        bookFlow,
+        chaptersFlow,
         libraryRepository.observeBookmarks(bookId)
     ) { book, chapters, bookmarks -> Triple(book, chapters, bookmarks) }
 
@@ -183,14 +192,19 @@ class BookDetailViewModel @Inject constructor(
         val autonomy: CompanionAutonomySettings
     )
 
-    private val bookDescription = libraryRepository.observeChapters(bookId).mapLatest { chapters ->
-        if (libraryRepository.getBook(bookId)?.removedAt != 0L) return@mapLatest ""
-        BookDescriptionExtractor.extract(
-            chapters.take(DESCRIPTION_CHAPTER_LIMIT).map { chapter ->
-                chapter.title to libraryRepository.readChapterText(bookId, chapter)
-            }
-        )
-    }
+    private val bookDescription = combine(
+        chaptersFlow,
+        bookFlow.map { it?.removedAt == 0L }.distinctUntilChanged()
+    ) { chapters, available -> if (available) chapters else emptyList() }
+        .distinctUntilChanged()
+        .mapLatest { chapters ->
+            BookDescriptionExtractor.extract(
+                chapters.take(DESCRIPTION_CHAPTER_LIMIT).map { chapter ->
+                    chapter.title to libraryRepository.readChapterText(bookId, chapter)
+                }
+            )
+        }.flowOn(Dispatchers.IO)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
 
     private val detailExtras = combine(
         settingsRepository.settings,
@@ -217,7 +231,7 @@ class BookDetailViewModel @Inject constructor(
         }
     }
 
-    val uiState = combine(
+    private val detailState: StateFlow<BookDetailUiState?> = combine(
         content,
         libraryRepository.observeReadingDays(bookId),
         working,
@@ -254,11 +268,21 @@ class BookDetailViewModel @Inject constructor(
             isLoading = false,
             isWorking = isWorking
         )
-    }.stateIn(
+    }.flowOn(Dispatchers.Default).stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
-        initialValue = BookDetailUiState()
+        initialValue = null
     )
+
+    // Book identity and the primary reading actions must not wait for secondary queries or text I/O.
+    // Both StateFlows retain their snapshots while navigation temporarily stops collection.
+    val uiState = combine(bookFlow, detailState) { book, details ->
+        when {
+            book == null -> BookDetailUiState(isLoading = false)
+            details == null -> BookDetailUiState(book = book)
+            else -> details.copy(book = book)
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BookDetailUiState())
 
     fun deleteBookmark(bookmarkId: Long) {
         viewModelScope.launch { libraryRepository.deleteBookmark(bookmarkId) }

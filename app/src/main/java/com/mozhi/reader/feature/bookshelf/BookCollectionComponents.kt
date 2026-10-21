@@ -309,7 +309,7 @@ internal fun CollectionPickerSheet(
         ) {
             Text("将 $selectedCount 本书加入合集", style = MaterialTheme.typography.titleLarge)
             LazyVerticalGrid(
-                columns = ShelfGridCells,
+                columns = ShelfGridCells(columnsOverride = 0),
                 modifier = Modifier.fillMaxWidth().height(400.dp),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -370,6 +370,7 @@ internal fun CollectionPickerSheet(
 @Composable
 internal fun CollectionContentsSheet(
     entry: ShelfEntry.Collection,
+    gridColumns: Int,
     onOpenBook: (Long) -> Unit,
     onReorderBooks: (List<Long>) -> Unit,
     onRemoveBook: (Long) -> Unit,
@@ -465,7 +466,7 @@ internal fun CollectionContentsSheet(
                     }
                 }
                 LazyVerticalGrid(
-                    columns = ShelfGridCells,
+                    columns = ShelfGridCells(gridColumns),
                     state = memberGridState,
                     modifier = Modifier
                         .fillMaxWidth()

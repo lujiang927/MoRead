@@ -1,4 +1,4 @@
-package com.mozhi.reader.feature.importer
+package com.mozhi.reader.core.epub
 
 import com.mozhi.reader.core.epub.css.CssParser
 import com.mozhi.reader.core.library.EpubFontFace

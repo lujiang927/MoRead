@@ -3,7 +3,7 @@ package com.mozhi.reader.feature.reader.engine
 import com.mozhi.reader.core.dictionary.*
 import com.mozhi.reader.core.library.EpubLayoutChapterBundle
 import com.mozhi.reader.core.library.EpubStylesheetText
-import com.mozhi.reader.feature.importer.EpubLayoutDocumentParser
+import com.mozhi.reader.core.epub.EpubLayoutDocumentParser
 import org.junit.Assert.*
 import org.junit.Test
 

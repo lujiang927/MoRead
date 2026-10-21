@@ -25,6 +25,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 data class ChapterDraft(
     val index: Int,
@@ -63,6 +65,8 @@ class LibraryRepository @Inject constructor(
     private val vectorStore: dagger.Lazy<BoxStore>,
     private val imageReferenceCleanup: dagger.Lazy<ImageReferenceCleanup>
 ) {
+    private val textImportMutex = Mutex()
+    private var pendingTextCleaned = false
     fun observeBooks(): Flow<List<BookEntity>> = bookDao.observeBooks()
 
     fun observeBooksIncludingRemoved(): Flow<List<BookEntity>> = bookDao.observeAllBooks()
@@ -309,6 +313,44 @@ class LibraryRepository @Inject constructor(
             if (markReady) bookDao.updateTextVersion(bookId, CURRENT_TEXT_VERSION)
         }
     }
+
+    /** Publish a ready TXT in one transaction. Process death cannot leave a duplicate with missing body text. */
+    suspend fun insertTextBook(book: BookEntity, chapters: List<ChapterDraft>, bodies: List<ChapterTextSlice>,
+        checkActive: () -> Unit = {}, onProgress: (Int, Int) -> Unit = { _, _ -> }): Long = withContext(Dispatchers.IO) { textImportMutex.withLock {
+        val directory = File(context.filesDir, "book-text").apply { mkdirs() }
+        if (!pendingTextCleaned) {
+            directory.listFiles()?.filter { it.isFile && (it.name.startsWith("import-") ||
+                it.name.startsWith("text-write-") || it.name.startsWith("text-compact-")) }?.forEach(File::delete)
+            pendingTextCleaned = true
+        }
+        val staged = File.createTempFile("import-", ".mz", directory)
+        var published: File? = null
+        try {
+            val ranges = textWriter.writeSlices(staged, bodies, checkActive, onProgress).associateBy { it.index }
+            require(ranges.size == chapters.size && chapters.all { it.index in ranges }) { "章节正文索引不完整" }
+            checkActive()
+            // The short publication transaction must finish or roll back as a unit even if the worker stops.
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                database.withTransaction {
+                    val bookId = bookDao.insertBook(book.copy(textVersion = CURRENT_TEXT_VERSION, totalChapters = chapters.size))
+                    bookDao.insertChapters(chapters.map { chapter ->
+                        val range = requireNotNull(ranges[chapter.index])
+                        ChapterEntity(bookId = bookId, chapterIndex = chapter.index, title = chapter.title,
+                            href = chapter.href, charCount = range.charCount,
+                            textByteOffset = range.byteOffset, textByteLength = range.byteLength)
+                    })
+                    bookDao.insertTocEntries(chapters.toFlatTocEntries().map { it.toEntity(bookId) })
+                    val target = textStore.textFile(bookId)
+                    BookTextArchive.replaceAtomically(staged, target)
+                    published = target
+                    bookId
+                }
+            }
+        } catch (error: Throwable) {
+            published?.delete()
+            throw error
+        } finally { staged.delete() }
+    } }
 
     /** Replaces exactly one selected range and returns the new cursor position after the edit. */
     suspend fun replaceChapterText(

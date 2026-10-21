@@ -58,6 +58,7 @@ class TabletBookshelfVisualTest {
     private var viewport by mutableStateOf<Int?>(null)
     private var query by mutableStateOf("")
     private var layout by mutableStateOf(ShelfLayout.GRID)
+    private var gridColumns by mutableIntStateOf(0)
     private var revision by mutableIntStateOf(0)
     private var openedBook: Long? = null
     private var imported = false
@@ -105,7 +106,7 @@ class TabletBookshelfVisualTest {
                             val selected = entry?.destination?.route
                             val state = BookshelfUiState(
                                 books = filterShelfBooks(books, refs, filter), allBooks = books, totalBooks = books.size,
-                                filter = filter, layout = layout, groups = groups, tags = tags, tagRefs = refs,
+                                filter = filter, layout = layout, gridColumns = gridColumns, groups = groups, tags = tags, tagRefs = refs,
                                 groupCounts = books.groupingBy { it.groupId }.eachCount(),
                                 tagCounts = refs.groupingBy { it.tagId }.eachCount(), recentBook = books.first(),
                                 recentChapterTitle = "第十一章 · 一骑红尘" + if (revision == 0) "" else " "
@@ -124,12 +125,12 @@ class TabletBookshelfVisualTest {
                                             val entries = visibleBooks.map { ShelfEntry.Book(it) }
                                             if (layout == ShelfLayout.GRID) BookGrid(entries, visibleBooks.size, state, query, { query = it },
                                                 { openedBook = it }, { openedBook = it.book.id }, {}, { _, _ -> }, drag, { _, _ -> },
-                                                { layout = it }, { filter = filter.copy(readState = it) },
+                                                { layout = it }, { gridColumns = it }, { filter = filter.copy(readState = it) },
                                                 { id, ungrouped -> filter = filter.copy(groupId = id, ungroupedOnly = ungrouped) },
                                                 {}, {}, {}, { filter = ShelfFilter() }, {}, {}, {}, { imported = true })
                                             else BookList(entries, visibleBooks.size, state, query, { query = it },
                                                 { openedBook = it }, { openedBook = it.book.id }, {}, { _, _ -> }, drag, { _, _ -> },
-                                                { layout = it }, { filter = filter.copy(readState = it) },
+                                                { layout = it }, { gridColumns = it }, { filter = filter.copy(readState = it) },
                                                 { id, ungrouped -> filter = filter.copy(groupId = id, ungroupedOnly = ungrouped) },
                                                 {}, {}, {}, { filter = ShelfFilter() }, {}, {}, {}, { imported = true })
                                         }
@@ -227,6 +228,47 @@ class TabletBookshelfVisualTest {
         compose.onNodeWithTag("tablet-filter-READING").assertIsSelected()
         compose.onNodeWithText("1 本").assertIsDisplayed()
     }
+
+    @Test @Config(qualifiers = "zh-rCN-w702dp-h936dp-mdpi")
+    fun eInkPortraitShowsThreeColumnsAndHonorsBooksPerRow() {
+        show()
+        compose.onNodeWithTag("shelf-scroll").performScrollToIndex(3)
+        compose.waitForIdle()
+        capture("tablet-library-eink-portrait-auto.png")
+        // 10.3 寸墨水屏竖屏：导航条窗口自动 3 列（issue #16 之前是 2 列）。
+        assertEquals(top("山茶文具店"), top("人类群星闪耀时"), .5f)
+        assertTrue(top("夜航西飞") > top("人类群星闪耀时"))
+
+        compose.onNodeWithTag("shelf-scroll").performScrollToIndex(0)
+        compose.onNodeWithContentDescription("视图与筛选").performClick()
+        compose.onNodeWithText("每行本数").performClick()
+        compose.waitForIdle()
+        // 菜单在独立弹窗里，root.draw 画不到；从 WindowManagerGlobal 取最上层窗口单独画。
+        assertEquals(2, compose.onAllNodes(isRoot()).fetchSemanticsNodes().size)
+        compose.runOnIdle {
+            val global = Class.forName("android.view.WindowManagerGlobal")
+            val instance = global.getMethod("getInstance").invoke(null)
+            @Suppress("UNCHECKED_CAST")
+            val views = global.getDeclaredField("mViews").apply { isAccessible = true }.get(instance) as List<View>
+            val popup = views.last { it !== root }
+            val bitmap = Bitmap.createBitmap(popup.width, popup.height, Bitmap.Config.ARGB_8888)
+            popup.draw(Canvas(bitmap))
+            File("build/reports/tablet-ui/tablet-library-eink-columns-menu.png").outputStream().use {
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
+            }
+            bitmap.recycle()
+        }
+        compose.onNodeWithText("5 本").performClick()
+        compose.runOnIdle { assertEquals(5, gridColumns) }
+        compose.onNodeWithTag("shelf-scroll").performScrollToIndex(3)
+        compose.waitForIdle()
+        capture("tablet-library-eink-portrait-five.png")
+        assertEquals(top("山茶文具店"), top("乡土中国"), .5f)
+        assertTrue(top("看不见的城市") > top("乡土中国"))
+    }
+
+    private fun top(title: String): Float =
+        compose.onNodeWithText(title).fetchSemanticsNode().boundsInRoot.top
 
     @Test @Config(qualifiers = "w411dp-h891dp-mdpi") fun phoneRetainsItsExistingLayout() {
         show()

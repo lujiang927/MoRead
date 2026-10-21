@@ -49,6 +49,13 @@ class RootDockStateTest {
         assertEquals(68.dp, dockTabWidth(600.dp, reserved, 4))
     }
 
+    @Test fun withoutATrailingButtonTheDockFillsTheWholeRow() {
+        // 右侧没有动作钮：页签平分整行（含舱内边距），不受 68dp 上限约束。
+        val full = dockFullTabWidth(375.dp, 4)
+        assertEquals(375.dp, full * 4 + 10.dp)
+        assertTrue(full > dockTabWidth(375.dp, RootDockHeight + RootDockGap, 4))
+    }
+
     @Test fun resetExpandsWithoutTouchingSearch() {
         val dock = RootDockState()
         repeat(3) { dock.onContentScrolled(-step) }

@@ -24,7 +24,10 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 import java.io.File
-import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.withContext
 
 @EntryPoint
 @InstallIn(SingletonComponent::class)
@@ -66,76 +69,73 @@ class BatchImportWorker(
     override suspend fun doWork(): Result {
         val requestId = inputData.getString(KEY_REQUEST_ID)
         val storedRequest = requestId?.let(requestStore::read)
-        if (requestId != null && storedRequest == null) {
-            return Result.failure(summaryData(0, 1, "批量导入任务清单已丢失，请重新选择文件"))
-        }
+        if (requestId != null && storedRequest == null)
+            return Result.failure(summaryData(0, 1, "批量导入任务清单已丢失或损坏，请重新选择文件"))
 
-        // 保留旧字段读取，避免升级时丢掉已经排入 WorkManager 的历史任务。
-        val uris = storedRequest?.entries?.map(BatchImportRequestEntry::uri)
-            ?: inputData.getStringArray(KEY_URIS).orEmpty().toList()
-        val groupPaths = storedRequest?.entries?.map(BatchImportRequestEntry::groupPath)
-            ?: inputData.getStringArray(KEY_GROUP_PATHS).orEmpty().toList()
-        // 局域网收件箱里的临时文件导完就删；SAF 选来的用户文件当然不能碰。
-        val deleteAfterImport = storedRequest?.deleteSourceAfterImport
-            ?: inputData.getBoolean(KEY_DELETE_SOURCE, false)
-        if (uris.isEmpty()) {
+        // Upgrade compatibility for jobs enqueued before request manifests were introduced.
+        val request = storedRequest ?: BatchImportRequestPayload(
+            inputData.getStringArray(KEY_URIS).orEmpty().mapIndexed { index, uri ->
+                BatchImportRequestEntry(uri, inputData.getStringArray(KEY_GROUP_PATHS)?.getOrNull(index).orEmpty())
+            }, inputData.getBoolean(KEY_DELETE_SOURCE, false)
+        )
+        val total = request.entries.size
+        if (total == 0) {
             requestId?.let(requestStore::delete)
             return Result.success(summaryData(0, 0, ""))
         }
 
-        return try {
-            setForeground(foregroundInfo(0, uris.size, ""))
-            var succeeded = 0
-            val failures = mutableListOf<String>()
-            val skipped = mutableListOf<String>()
-
-            uris.forEachIndexed { index, raw ->
-                val uri = Uri.parse(raw)
-                val label = displayNameOf(uri)
-                setProgress(progressData(index, uris.size, label))
-                setForegroundAsync(foregroundInfo(index, uris.size, label))
-                try {
-                    val bookId = gateway.importDirectly(uri)
-                    groupPaths.getOrNull(index)?.takeIf(String::isNotBlank)?.let { path ->
-                        shelfRepository.createOrGetGroupPath(path)?.let { groupId ->
-                            shelfRepository.setBookGroup(listOf(bookId), groupId)
-                        }
-                    }
-                    succeeded++
-                    if (deleteAfterImport) {
-                        runCatching { uri.path?.let { File(it).delete() } }
-                    }
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (duplicate: com.mozhi.reader.core.importer.DuplicateBookException) {
-                    // 同一本书已在库里：跳过，不占用空间；局域网收件箱的临时副本照样清掉。
-                    skipped += label
-                    if (deleteAfterImport) runCatching { uri.path?.let { File(it).delete() } }
-                } catch (error: Throwable) {
-                    failures += "$label：${error.message ?: "导入失败"}"
-                }
-            }
-
-            Result.success(
-                summaryData(
-                    succeeded,
-                    failures.size,
-                    (failures.take(MAX_REPORTED_FAILURES) +
-                        listOfNotNull(skipped.takeIf { it.isNotEmpty() }?.let { applicationContext.getString(com.mozhi.reader.R.string.import_skipped_duplicates, it.size, it.take(MAX_REPORTED_FAILURES).joinToString(", ")) }))
-                        .joinToString("\n")
-                )
-            )
-        } finally {
-            requestId?.let(requestStore::delete)
+        setForeground(foregroundInfo(request.checkpoint.nextIndex, total, ""))
+        val reporter = BatchImportProgressReporter(CoroutineScope(currentCoroutineContext())) { progress ->
+            val label = displayNameOf(Uri.parse(progress.uri)).take(200)
+            val stage = progress.stage.ifBlank { applicationContext.getString(com.mozhi.reader.R.string.import_preparing) }
+            setProgress(workDataOf(
+                KEY_PROGRESS_COMPLETED to progress.index, KEY_PROGRESS_TOTAL to total,
+                KEY_PROGRESS_LABEL to label, KEY_PROGRESS_STAGE to stage,
+                KEY_PROGRESS_BOOK_COMPLETED to progress.completed, KEY_PROGRESS_BOOK_TOTAL to progress.total
+            ))
+            val percent = if (progress.total > 0)
+                " · ${(progress.completed.toLong() * 100 / progress.total).coerceIn(0, 100)}%" else ""
+            setForeground(foregroundInfo(progress.index, total, "$label · $stage$percent"))
         }
+        val result = try { BatchImportRunner(
+            importBook = { raw, progress -> gateway.importDirectly(Uri.parse(raw), progress) },
+            assignGroup = { bookId, path ->
+                shelfRepository.createOrGetGroupPath(path)?.let { groupId ->
+                    shelfRepository.setBookGroup(listOf(bookId), groupId)
+                }
+            },
+            persist = { checkpoint ->
+                requestId?.let { requestStore.checkpoint(it, checkpoint) }
+            },
+            deleteSource = { raw ->
+                val uri = Uri.parse(raw)
+                if (uri.scheme == "file") uri.path?.let { File(it).delete() }
+            },
+            progress = { index, raw, stage, completed, bookTotal ->
+                reporter.update(BatchBookProgress(index, raw, stage, completed, bookTotal))
+            },
+            labelOf = { displayNameOf(Uri.parse(it)) },
+            failureMessage = applicationContext.getString(com.mozhi.reader.R.string.import_failed)
+        ).run(request) } finally {
+            withContext(NonCancellable) { reporter.close() }
+        }
+
+        val detail = (result.failures + listOfNotNull(
+            result.skipped.takeIf { it > 0 }?.let {
+                applicationContext.getString(com.mozhi.reader.R.string.import_skipped_duplicates,
+                    it, result.skippedLabels.joinToString(", "))
+            }
+        )).joinToString("\n")
+        // Keep the completed checkpoint until expiry too: process death between this return and
+        // WorkManager committing SUCCESS must not turn a finished batch into a missing-manifest failure.
+        setProgress(progressData(total, total, ""))
+        return Result.success(summaryData(result.succeeded, result.failed, detail))
     }
 
     override suspend fun getForegroundInfo(): ForegroundInfo {
-        val storedCount = inputData.getString(KEY_REQUEST_ID)
-            ?.let(requestStore::read)
-            ?.entries
-            ?.size
-        return foregroundInfo(0, storedCount ?: inputData.getStringArray(KEY_URIS)?.size ?: 0, "")
+        val stored = inputData.getString(KEY_REQUEST_ID)?.let(requestStore::read)
+        return foregroundInfo(stored?.checkpoint?.nextIndex ?: 0,
+            stored?.entries?.size ?: inputData.getStringArray(KEY_URIS)?.size ?: 0, "")
     }
 
     private fun displayNameOf(uri: Uri): String {
@@ -213,11 +213,13 @@ class BatchImportWorker(
         const val KEY_PROGRESS_COMPLETED = "progress_completed"
         const val KEY_PROGRESS_TOTAL = "progress_total"
         const val KEY_PROGRESS_LABEL = "progress_label"
+        const val KEY_PROGRESS_STAGE = "progress_stage"
+        const val KEY_PROGRESS_BOOK_COMPLETED = "progress_book_completed"
+        const val KEY_PROGRESS_BOOK_TOTAL = "progress_book_total"
         const val UNIQUE_WORK_NAME = "batch-book-import"
 
         private const val CHANNEL_ID = "book_import"
         private const val NOTIFICATION_ID = 4_200
-        private const val MAX_REPORTED_FAILURES = 8
         private const val MAX_DETAIL_CHARS = 1_200
 
         fun request(requestId: String) =

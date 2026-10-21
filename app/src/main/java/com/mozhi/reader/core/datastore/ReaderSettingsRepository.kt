@@ -121,6 +121,7 @@ class ReaderSettingsRepository @Inject constructor(
             shelfLayout = preferences[Keys.ShelfLayout]
                 ?.let { runCatching { ShelfLayout.valueOf(it) }.getOrNull() }
                 ?: ShelfLayout.GRID,
+            shelfGridColumns = preferences[Keys.ShelfGridColumns]?.takeIf { it in 3..6 } ?: 0,
             shelfBookOrder = preferences[Keys.ShelfBookOrder]
                 ?.split(',')
                 ?.mapNotNull(String::toLongOrNull)
@@ -810,6 +811,10 @@ class ReaderSettingsRepository @Inject constructor(
         dataStore.edit { it[Keys.ShelfLayout] = value.name }
     }
 
+    suspend fun setShelfGridColumns(value: Int) {
+        dataStore.edit { it[Keys.ShelfGridColumns] = if (value == 0) 0 else value.coerceIn(3, 6) }
+    }
+
     suspend fun setShelfBookOrder(value: List<Long>, readAnchor: Long) {
         dataStore.edit {
             it[Keys.ShelfBookOrder] = value.distinct().joinToString(",")
@@ -1139,6 +1144,14 @@ class ReaderSettingsRepository @Inject constructor(
         dataStore.edit { it[Keys.ShowAiAnnotations] = value }
     }
 
+    /** 阅读页伴读悬浮球：关闭后只隐藏球，阅读页菜单栏的「伴读」入口照常可用。默认开。 */
+    val companionOrbVisible: Flow<Boolean> =
+        dataStore.data.map { it[Keys.CompanionOrbVisible] ?: true }
+
+    suspend fun setCompanionOrbVisible(value: Boolean) {
+        dataStore.edit { it[Keys.CompanionOrbVisible] = value }
+    }
+
     /** 即划即改：记住上次划线样式（AnnotationStyle wire 值），一击直接复用。 */
     val lastAnnotationStyle: Flow<String> =
         dataStore.data.map { it[Keys.LastAnnotationStyle] ?: "HIGHLIGHT" }
@@ -1386,6 +1399,7 @@ class ReaderSettingsRepository @Inject constructor(
         val ModernBackTextOpacity = floatPreferencesKey("reader_modern_back_text_opacity")
         val ModernCurlRadiusScale = floatPreferencesKey("reader_modern_curl_radius_scale")
         val ShelfLayout = stringPreferencesKey("shelf_layout")
+        val ShelfGridColumns = intPreferencesKey("shelf_grid_columns")
         val ShelfBookOrder = stringPreferencesKey("shelf_book_order")
         val ShelfBookOrderReadAnchor = longPreferencesKey("shelf_book_order_read_anchor")
         val ReadingOrderAffectsShelf = booleanPreferencesKey("reading_order_affects_shelf")
@@ -1427,6 +1441,7 @@ class ReaderSettingsRepository @Inject constructor(
         val CompanionGenUi = stringPreferencesKey("companion_genui")
         val CompanionSpoilerProtection = booleanPreferencesKey("companion_spoiler_protection")
         val ShowAiAnnotations = booleanPreferencesKey("companion_show_ai_annotations")
+        val CompanionOrbVisible = booleanPreferencesKey("companion_orb_visible")
         val CompanionLongTermMemory = booleanPreferencesKey("companion_long_term_memory")
         val CompanionCrossBookMemory = booleanPreferencesKey("companion_cross_book_memory")
         val CompanionCrossBookChatSearch = booleanPreferencesKey("companion_cross_book_chat_search")

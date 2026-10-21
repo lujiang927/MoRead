@@ -19,6 +19,11 @@ import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.withContext
 
 @EntryPoint
 @InstallIn(SingletonComponent::class)
@@ -48,18 +53,28 @@ class TxtImportWorker(
         setForeground(createForegroundInfo(sessionId, initialProgress))
         setProgress(initialProgress.toData())
 
+        val reporter = ImportProgressReporter<ImportProgress>(CoroutineScope(currentCoroutineContext())) { progress ->
+            setProgress(progress.toData())
+            setForeground(createForegroundInfo(sessionId, progress))
+        }
+        var latestProgress = initialProgress
         return try {
             val bookId = coordinator.confirmTxt(
                 sessionId = sessionId,
                 title = title,
                 author = author
             ) { progress ->
-                setProgressAsync(progress.toData())
-                setForegroundAsync(createForegroundInfo(sessionId, progress))
+                latestProgress = progress
+                reporter.update(progress)
             }
+            reporter.close()
+            setProgress(latestProgress.toData())
             Result.success(workDataOf(KEY_BOOK_ID to bookId))
-        } catch (error: Throwable) {
+        } catch (error: Exception) {
+            if (error is CancellationException) throw error
             Result.failure(errorData(error.message ?: "后台导入失败"))
+        } finally {
+            withContext(NonCancellable) { reporter.close() }
         }
     }
 

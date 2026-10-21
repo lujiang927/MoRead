@@ -77,8 +77,13 @@ class MoReadBottomSheetTest {
     }
 
     @Test fun productionSheetsCannotBypassTheCommonHost() {
-        val files = File("src/main/java").walkTopDown().filter { it.extension == "kt" && it.name != "MoReadBottomSheet.kt" }
+        val files = File("src/main/java").walkTopDown().filter { it.extension == "kt" && it.name != "MoReadBottomSheet.kt" }.toList()
         val bypasses = files.filter { Regex("\\bModalBottomSheet\\s*\\(").containsMatchIn(it.readText()) }.toList()
         assertTrue("Use MoReadBottomSheet or NavigationSheet: $bypasses", bypasses.isEmpty())
+        val partialSheets = files.filter {
+            Regex("rememberModalBottomSheetState\\(\\s*\\)|rememberModalBottomSheetState\\([^)]*skipPartiallyExpanded\\s*=\\s*false")
+                .containsMatchIn(it.readText())
+        }
+        assertTrue("弹层统一在展开位置打开，不提供上拉扩展停靠点: $partialSheets", partialSheets.isEmpty())
     }
 }
