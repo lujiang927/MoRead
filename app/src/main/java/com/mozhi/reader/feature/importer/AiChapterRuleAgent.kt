@@ -6,7 +6,9 @@ import com.mozhi.reader.ai.client.ChatMessage
 import com.mozhi.reader.ai.client.ChatRole
 import com.mozhi.reader.core.database.entity.ModelRole
 import javax.inject.Inject
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
@@ -34,10 +36,14 @@ class AiChapterRuleAgent @Inject constructor(
         onAttempt: (Int) -> Unit = {}
     ): AiChapterRuleProposal {
         val session = withContext(Dispatchers.IO) {
-            requireNotNull(sessionStore.get(sessionId)) { "导入会话已失效" }
+            val coroutineContext = currentCoroutineContext()
+            requireNotNull(sessionStore.get(sessionId) { coroutineContext.ensureActive() }) { "导入会话已失效" }
         }
-        val structuralSample = withContext(Dispatchers.Default) {
-            AiChapterRuleSampler.sample(session.text)
+        val structuralSample = withContext(Dispatchers.IO) {
+            session.openText().use {
+                if (it.length > 8_000_000) throw TxtRegexInputTooLargeException()
+                AiChapterRuleSampler.sample(it)
+            }
         }
         val resolved = clientFactory.forRole(ModelRole.CHEAP)
         val messages = mutableListOf(
@@ -68,8 +74,11 @@ class AiChapterRuleAgent @Inject constructor(
             if (draft == null) {
                 lastFailure = "返回内容不是约定的 JSON，或缺少 name、regex、reason"
             } else {
-                when (val validation = withContext(Dispatchers.Default) {
-                    AiChapterRuleValidator.validate(session.text, draft.regex, chapterSplitter)
+                when (val validation = withContext(Dispatchers.IO) {
+                    val coroutineContext = currentCoroutineContext()
+                    session.openText().use { text ->
+                        AiChapterRuleValidator.validate(text, draft.regex, chapterSplitter) { coroutineContext.ensureActive() }
+                    }
                 }) {
                     is AiChapterRuleValidation.Valid -> return AiChapterRuleProposal(
                         name = draft.name,
@@ -79,7 +88,7 @@ class AiChapterRuleAgent @Inject constructor(
                         sampleTitles = validation.result.chapters
                             .asSequence()
                             .filterNot { it.title == "序章" }
-                            .map(TxtChapter::title)
+                            .map(TxtChapterRange::title)
                             .take(6)
                             .toList()
                     )
@@ -129,15 +138,16 @@ internal object AiChapterRuleResponseParser {
 }
 
 internal sealed interface AiChapterRuleValidation {
-    data class Valid(val result: TxtSplitResult) : AiChapterRuleValidation
+    data class Valid(val result: TxtIndexedSplit) : AiChapterRuleValidation
     data class Invalid(val reason: String) : AiChapterRuleValidation
 }
 
 internal object AiChapterRuleValidator {
     fun validate(
-        text: String,
+        text: CharSequence,
         regex: String,
-        splitter: TxtChapterSplitter
+        splitter: TxtChapterSplitter,
+        checkActive: () -> Unit = {}
     ): AiChapterRuleValidation {
         if (regex.length > 400) return AiChapterRuleValidation.Invalid("正则超过 400 字符")
         if (!regex.trimStart().startsWith("^") || !regex.trimEnd().endsWith('$')) {
@@ -146,18 +156,36 @@ internal object AiChapterRuleValidator {
         if (NESTED_QUANTIFIER.containsMatchIn(regex)) {
             return AiChapterRuleValidation.Invalid("正则包含可能造成灾难性回溯的嵌套量词")
         }
-        val compiled = runCatching { Regex(regex, RegexOption.MULTILINE) }.getOrElse {
+        val compiled = runCatching { java.util.regex.Pattern.compile(regex, java.util.regex.Pattern.MULTILINE) }.getOrElse {
             return AiChapterRuleValidation.Invalid("正则无法编译：${it.message.orEmpty()}")
         }
-        val firstMatches = runCatching { compiled.findAll(text).take(MAX_CHAPTERS + 1).toList() }
-            .getOrElse { return AiChapterRuleValidation.Invalid("正则执行失败：${it.message.orEmpty()}") }
-        if (firstMatches.size < 2) return AiChapterRuleValidation.Invalid("全文只匹配到 ${firstMatches.size} 个标题")
-        if (firstMatches.size > MAX_CHAPTERS) return AiChapterRuleValidation.Invalid("匹配结果超过 $MAX_CHAPTERS 个，疑似误中正文")
-        if (firstMatches.any { it.value.trim().length !in 1..80 }) {
-            return AiChapterRuleValidation.Invalid("规则命中了空行或超过 80 字的正文行")
+        val input = chapterRegexInput(text, checkActive)
+        val matcher = compiled.matcher(input)
+        var matchCount = 0
+        try {
+            while (matcher.find()) {
+                checkActive()
+                matchCount++
+                if (matchCount > MAX_CHAPTERS) return AiChapterRuleValidation.Invalid("匹配结果超过 $MAX_CHAPTERS 个，疑似误中正文")
+                var start = matcher.start()
+                var end = matcher.end()
+                while (start < end && text[start].isWhitespace()) {
+                    if (start and 0xFFFF == 0) checkActive()
+                    start++
+                }
+                while (end > start && text[end - 1].isWhitespace()) {
+                    if (end and 0xFFFF == 0) checkActive()
+                    end--
+                }
+                if (end - start !in 1..80) return AiChapterRuleValidation.Invalid("规则命中了空行或超过 80 字的正文行")
+            }
+        } catch (error: Exception) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            return AiChapterRuleValidation.Invalid("正则执行失败：${error.message.orEmpty()}")
         }
+        if (matchCount < 2) return AiChapterRuleValidation.Invalid("全文只匹配到 $matchCount 个标题")
 
-        val result = splitter.splitWithCustomRegex(text, regex)
+        val result = splitter.indexWithCustomRegex(input, regex, checkActive)
             ?: return AiChapterRuleValidation.Invalid("规则未形成至少两个有效章节")
         val contentChapters = result.chapters.filterNot { it.title == "序章" }
         val tooShortRatio = contentChapters.count { it.charCount < 20 }.toFloat() /
@@ -179,14 +207,14 @@ internal object AiChapterRuleValidator {
 
 /** 只向模型发送行的结构形状，不发送原始正文或标题语义。 */
 internal object AiChapterRuleSampler {
-    fun sample(text: String): String {
+    fun sample(text: CharSequence): String {
         if (text.isBlank()) return "（空文本）"
         val anchors = listOf(0f, 0.25f, 0.5f, 0.75f, 1f)
         return anchors.mapIndexed { index, fraction ->
             val center = (text.length * fraction).toInt().coerceIn(0, text.length)
             val start = (center - WINDOW_CHARS / 2).coerceIn(0, text.length)
             val end = (start + WINDOW_CHARS).coerceAtMost(text.length)
-            val candidates = text.substring(start, end)
+            val candidates = text.subSequence(start, end).toString()
                 .lineSequence()
                 .map(String::trim)
                 .filter { it.length in 1..MAX_LINE_CHARS }

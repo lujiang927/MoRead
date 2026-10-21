@@ -64,4 +64,29 @@ class ProactiveAnnotationParagraphsTest {
         assertTrue(buckets.all { it.size > 1 })
         assertEquals(buckets.map { it.first() }, ProactiveAnnotationParagraphs.candidates(body, 2, from))
     }
+
+    @Test fun unlimitedGenerationCoversTheChapterBeforeFillingEveryParagraphInItsOpening() {
+        val body = (0..59).joinToString("\n") { "$it：" + "河岸的灯火映在水面，远处钟声缓缓响起。".repeat(5) }
+        val plan = ProactiveAnnotationParagraphs.generationBuckets(body, Int.MAX_VALUE)
+        val targets = plan.flatten()
+        assertEquals(ProactiveAnnotationParagraphs.split(body).toSet(), targets.toSet())
+        assertEquals(targets.size, targets.distinct().size)
+        assertTrue(plan.all { it.size == 1 })
+        // 第一轮只用少量调用就覆盖中段与末段，而非全部花在前几页。
+        val firstCoverage = targets.take((body.length + 799) / 800)
+        assertTrue(firstCoverage.any { it.start in body.length / 3..body.length * 2 / 3 })
+        assertTrue(firstCoverage.any { it.start >= body.length * 4 / 5 })
+        assertEquals(targets.first(), ProactiveAnnotationParagraphs.split(body).first())
+        assertEquals(plan, ProactiveAnnotationParagraphs.generationBuckets(body, Int.MAX_VALUE))
+    }
+
+    @Test fun coveragePlanKeepsTheReaderBoundaryAndFiniteSelectionUnchanged() {
+        val body = (0..49).joinToString("\n") { "$it：" + "句子。".repeat(25) }
+        val from = body.indexOf("20：")
+        val targets = ProactiveAnnotationParagraphs.generationBuckets(body, Int.MAX_VALUE, from).flatten()
+        assertEquals(ProactiveAnnotationParagraphs.split(body).filter { it.start >= from }.toSet(), targets.toSet())
+        assertTrue(targets.all { it.start >= from })
+        assertEquals(ProactiveAnnotationParagraphs.buckets(body, 5, from),
+            ProactiveAnnotationParagraphs.generationBuckets(body, 5, from))
+    }
 }

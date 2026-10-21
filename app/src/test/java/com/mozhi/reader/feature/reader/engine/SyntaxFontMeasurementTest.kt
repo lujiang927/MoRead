@@ -9,7 +9,7 @@ import com.mozhi.reader.core.library.EpubLayoutBlock
 import com.mozhi.reader.core.library.EpubLayoutBlockKind
 import com.mozhi.reader.core.library.EpubLayoutChapter
 import com.mozhi.reader.core.library.EpubLayoutChapterBundle
-import com.mozhi.reader.feature.importer.EpubLayoutDocumentParser
+import com.mozhi.reader.core.epub.EpubLayoutDocumentParser
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

@@ -1,5 +1,7 @@
 package com.mozhi.reader.feature.importer
 
+import com.mozhi.reader.core.epub.EpubLegacyStyleBridge
+import com.mozhi.reader.core.epub.EpubStylesheetSource
 import org.jsoup.Jsoup
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotSame

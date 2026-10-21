@@ -16,7 +16,7 @@ import org.junit.Test
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class ProactiveAnnotationSchedulerWorkerTest {
-    @Test fun unlimitedCurrentChapterSharesEveryPassWithAheadChapterAndAllSelectedCompanions() = runTest {
+    @Test fun unlimitedCurrentChapterLeadsEachPassButStillSharesWithAheadChapterAndAllSelectedCompanions() = runTest {
         val f = Fixture(backgroundScope)
         f.autonomy.value = f.autonomy.value.copy(annotationPersonaIds = setOf(3, 8),
             annotationLimits = f.autonomy.value.annotationLimits.copy(aheadChapters = 1,
@@ -26,7 +26,9 @@ class ProactiveAnnotationSchedulerWorkerTest {
             val request = firstArg<ProactiveAnnotationRequest>()
             val nextEnd = (request.visitedParagraphEnds.maxOrNull() ?: 0) + 20
             assertEquals(Int.MAX_VALUE, request.candidateLimit)
-            assertEquals(1, request.maxSlotsPerPass)
+            // 正在读的这章每轮多写几格，预生成的章节一格一让。
+            assertEquals(if (request.chapterIndex == 0) PROACTIVE_VISIBLE_CHAPTER_SLOTS_PER_PASS else 1, request.maxSlotsPerPass)
+            assertNotNull(request.readerOffset)
             ProactiveAnnotationGenerationResult(false, false, hasMore = nextEnd < 60,
                 visitedParagraphEnds = setOf(nextEnd))
         }
@@ -65,6 +67,7 @@ class ProactiveAnnotationSchedulerWorkerTest {
         f.scheduler.onChapterEntered(1, 0); runCurrent()
         assertEquals(listOf(3L, 8L), requests.map { it.persona.id })
         assertEquals(2, f.ledger.rows.size)
+        f.ledger.markAllCandidatesDone(f.body)
         f.persona.value = 12; runCurrent()
         f.scheduler.onChapterEntered(1, 0); runCurrent()
         assertEquals(2, requests.size)
@@ -97,6 +100,10 @@ class ProactiveAnnotationSchedulerWorkerTest {
     private class Ledger : ProactiveAnnotationJobDao {
         val rows = linkedMapOf<Long, ProactiveAnnotationJobEntity>()
         var dailyCount = 0
+        fun markAllCandidatesDone(body: String) {
+            val ends = ProactiveAnnotationParagraphs.split(body).joinToString(prefix = "[", postfix = "]") { it.end.toString() }
+            rows.replaceAll { _, job -> job.copy(doneParagraphEnds = ends) }
+        }
         override suspend fun deleteForBook(bookId: Long) { rows.entries.removeAll { it.value.bookId == bookId } }
         override suspend fun find(bookId: Long, chapterIndex: Int, personaId: Long, revision: String) =
             rows.values.firstOrNull { it.bookId == bookId && it.chapterIndex == chapterIndex && it.personaId == personaId && it.sourceRevision == revision }
@@ -161,6 +168,7 @@ class ProactiveAnnotationSchedulerWorkerTest {
         assertEquals(listOf(0, 19), requests.map { it.chapterIndex })
         assertEquals(requests.map { it.chapterIndex }.distinct(), requests.map { it.chapterIndex })
         val count = requests.size
+        f.ledger.markAllCandidatesDone(f.body)
         f.scheduler.onChapterEntered(1, 19); runCurrent()
         assertEquals(count, requests.size)
     }
@@ -493,10 +501,49 @@ class ProactiveAnnotationSchedulerWorkerTest {
         assertEquals(1, f.ledger.rows.size)
         assertEquals(0, f.ledger.rows.values.single().attempts)
         assertEquals("DONE", f.ledger.rows.values.single().status)
-        // Completed jobs stay complete even when a later setting asks for more paragraphs.
+        // 已覆盖全部实际候选的章节不会因为调高条数而重复请求。
+        f.ledger.markAllCandidatesDone(f.body)
         f.autonomy.value = f.autonomy.value.copy(annotationLimits = f.autonomy.value.annotationLimits.copy(maxPerChapter = 4))
         runCurrent()
         assertEquals(2, calls)
+    }
+
+    @Test fun unlimitedSettingReopensIncompleteDoneJobAndKeepsItsSuccessfulParagraphLedger() = runTest {
+        val f = Fixture(backgroundScope)
+        f.body = (0..9).joinToString("\n") { "段落$it：" + "原文内容。".repeat(15) }
+        val ends = ProactiveAnnotationParagraphs.split(f.body).take(2).map { it.end }
+        f.ledger.insert(ProactiveAnnotationJobEntity(bookId = 1, chapterIndex = 0, personaId = 3,
+            sourceRevision = ProactiveAnnotationParagraphs.revision(f.body), status = "DONE", attempts = 1,
+            doneParagraphEnds = ends.joinToString(prefix = "[", postfix = "]"), createdAt = 0, updatedAt = 0))
+        f.autonomy.value = f.autonomy.value.copy(annotationLimits = f.autonomy.value.annotationLimits.copy(aheadChapters = 0,
+            maxPerChapter = ProactiveAnnotationLimits.UNLIMITED, dailyMax = ProactiveAnnotationLimits.UNLIMITED))
+        coEvery { f.quota.reserve(any(), any(), any(), any()) } returns ProactiveAnnotationAllowance(true, Int.MAX_VALUE)
+        val requests = mutableListOf<ProactiveAnnotationRequest>()
+        coEvery { f.service.generateForChapter(capture(requests), any(), any(), any()) } returns ProactiveAnnotationGenerationResult(false, false)
+        f.scheduler.onChapterEntered(1, 0); runCurrent()
+        assertEquals(Int.MAX_VALUE, requests.single().candidateLimit)
+        assertEquals(ends.toSet(), requests.single().doneParagraphEnds)
+        assertEquals(1, f.ledger.rows.values.single().attempts)
+        assertEquals("DONE", f.ledger.rows.values.single().status)
+        // 真实 service 补齐后写入完整账本；再次进入时不调模型。
+        f.ledger.markAllCandidatesDone(f.body)
+        f.scheduler.onChapterEntered(1, 0); runCurrent()
+        assertEquals(1, requests.size)
+    }
+
+    @Test fun finiteChapterCapStillStopsIncompleteDoneJobUntilTheCapIsRaised() = runTest {
+        val f = Fixture(backgroundScope)
+        f.body = (0..9).joinToString("\n") { "段落$it：" + "原文内容。".repeat(15) }
+        val ends = ProactiveAnnotationParagraphs.split(f.body).take(2).map { it.end }
+        f.ledger.insert(ProactiveAnnotationJobEntity(bookId = 1, chapterIndex = 0, personaId = 3,
+            sourceRevision = ProactiveAnnotationParagraphs.revision(f.body), status = "DONE",
+            doneParagraphEnds = ends.joinToString(prefix = "[", postfix = "]"), createdAt = 0, updatedAt = 0))
+        f.autonomy.value = f.autonomy.value.copy(annotationLimits = f.autonomy.value.annotationLimits.copy(aheadChapters = 0))
+        f.scheduler.onChapterEntered(1, 0); runCurrent()
+        coVerify(exactly = 0) { f.service.generateForChapter(any(), any(), any(), any()) }
+        f.autonomy.value = f.autonomy.value.copy(annotationLimits = f.autonomy.value.annotationLimits.copy(maxPerChapter = 5))
+        runCurrent()
+        coVerify(exactly = 1) { f.service.generateForChapter(match { it.candidateLimit == 5 && it.doneParagraphEnds == ends.toSet() }, any(), any(), any()) }
     }
 
     @Test fun contextBudgetChangeRejectsStaleWorkAndRequeuesWithNewBudget() = runTest {

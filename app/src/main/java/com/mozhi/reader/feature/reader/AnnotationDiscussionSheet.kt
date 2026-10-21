@@ -1,5 +1,10 @@
 package com.mozhi.reader.feature.reader
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -15,7 +20,6 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -35,6 +39,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Colorize
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material3.AlertDialog
@@ -432,6 +438,9 @@ internal fun AnnotationDiscussionSheet(
             }
         }
 
+        // 原文只是「在讨论哪一句」的索引，讨论才是主体：原文小一号、默认折三行，
+        // 样式条收在原文标题行的小钮里，要改时再展开，不常驻占一整行。
+        var styleEditing by rememberSaveable { mutableStateOf(false) }
         if (quote.isNotBlank() && quoteSource != null) {
             val quoteStyle = AnnotationStyle.fromWire(quoteSource.style)
             val quoteInk = annotationSolidColor(
@@ -445,17 +454,34 @@ internal fun AnnotationDiscussionSheet(
                 style = quoteStyle,
                 ink = quoteInk,
                 palette = palette,
-                modifier = Modifier.padding(top = 2.dp, bottom = 10.dp)
+                styleToggle = if (ownAnnotation != null) {
+                    {
+                        StyleToggleChip(
+                            style = quoteStyle,
+                            ink = quoteInk,
+                            expanded = styleEditing,
+                            palette = palette,
+                            onClick = { styleEditing = !styleEditing }
+                        )
+                    }
+                } else null,
+                modifier = Modifier.padding(top = 2.dp, bottom = 8.dp)
             )
         }
         ownAnnotation?.let { own ->
-            InlineStyleControls(
-                selectedStyle = AnnotationStyle.fromWire(own.style),
-                selectedColor = AnnotationColors.normalize(own.colorTag),
-                palette = palette,
-                onChange = { style, color -> onUpdateStyle(own.id, style, color) },
-                modifier = Modifier.padding(bottom = 12.dp)
-            )
+            AnimatedVisibility(
+                visible = styleEditing,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                InlineStyleControls(
+                    selectedStyle = AnnotationStyle.fromWire(own.style),
+                    selectedColor = AnnotationColors.normalize(own.colorTag),
+                    palette = palette,
+                    onChange = { style, color -> onUpdateStyle(own.id, style, color) },
+                    modifier = Modifier.padding(bottom = 10.dp)
+                )
+            }
         }
 
         LazyColumn(
@@ -503,8 +529,9 @@ internal fun AnnotationDiscussionSheet(
                         deleteLabel = "删除批注",
                         onDelete = { onDeleteAnnotation(annotation.id) }
                     ) {
+                        val media = AnnotationMedia.decode(annotation.mediaJson)
                         if (annotation.note.isNotBlank()) {
-                            ThreadText(annotation.note, palette)
+                            if (!media.hasVoice) ThreadText(annotation.note, palette)
                         } else {
                             Text(
                                 "划了这段原文，还没写想法",
@@ -513,7 +540,7 @@ internal fun AnnotationDiscussionSheet(
                             )
                         }
                         AnnotationMediaContent(
-                            media = AnnotationMedia.decode(annotation.mediaJson),
+                            media = media,
                             text = annotation.note,
                             illustrations = illustrations,
                             palette = palette,
@@ -534,9 +561,10 @@ internal fun AnnotationDiscussionSheet(
                         deleteLabel = "删除",
                         onDelete = { onDeleteReply(reply.id) }
                     ) {
-                        ThreadText(reply.contentMarkdown, palette)
+                        val media = AnnotationMedia.decode(reply.mediaJson)
+                        if (!media.hasVoice) ThreadText(reply.contentMarkdown, palette)
                         AnnotationMediaContent(
-                            media = AnnotationMedia.decode(reply.mediaJson),
+                            media = media,
                             text = reply.contentMarkdown,
                             illustrations = illustrations,
                             palette = palette,
@@ -674,23 +702,30 @@ private fun StyledQuote(
     style: AnnotationStyle,
     ink: Color,
     palette: ReaderPalette,
+    maxLines: Int,
+    onOverflowChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var layout by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
     val display = remember(text) { if (text.length > QUOTE_MAX_CHARS) text.take(QUOTE_MAX_CHARS) + "…" else text }
     Text(
         text = display,
-        style = MaterialTheme.typography.bodyLarge.copy(
+        style = MaterialTheme.typography.bodyMedium.copy(
             fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
-            fontSize = 17.sp,
-            lineHeight = 31.sp
+            fontSize = QUOTE_FONT_SIZE,
+            lineHeight = QUOTE_LINE_HEIGHT
         ),
-        color = palette.onBackground,
-        maxLines = 4,
+        // 比讨论正文退半步：读者认得出是哪一句即可，不跟讨论抢视线。
+        color = palette.onBackground.copy(alpha = if (palette.isDark) 0.74f else 0.72f),
+        maxLines = maxLines,
         overflow = TextOverflow.Ellipsis,
-        onTextLayout = { layout = it },
+        onTextLayout = {
+            layout = it
+            onOverflowChange(it.hasVisualOverflow)
+        },
         modifier = modifier.drawBehind {
             val result = layout ?: return@drawBehind
+            val glyph = QUOTE_FONT_SIZE.toPx()
             for (line in 0 until result.lineCount) {
                 val left = result.getLineLeft(line)
                 val right = result.getLineRight(line)
@@ -699,20 +734,20 @@ private fun StyledQuote(
                 when (style) {
                     AnnotationStyle.HIGHLIGHT -> drawRoundRect(
                         color = ink.copy(alpha = if (palette.isDark) 0.26f else 0.30f),
-                        topLeft = Offset(left - 2.dp.toPx(), baseline - 19.sp.toPx()),
-                        size = androidx.compose.ui.geometry.Size(right - left + 4.dp.toPx(), 24.sp.toPx()),
+                        topLeft = Offset(left - 2.dp.toPx(), baseline - glyph * 1.1f),
+                        size = androidx.compose.ui.geometry.Size(right - left + 4.dp.toPx(), glyph * 1.42f),
                         cornerRadius = androidx.compose.ui.geometry.CornerRadius(3.dp.toPx())
                     )
                     AnnotationStyle.UNDERLINE -> drawLine(
                         color = ink,
-                        start = Offset(left, baseline + 5.dp.toPx()),
-                        end = Offset(right, baseline + 5.dp.toPx()),
-                        strokeWidth = 1.6.dp.toPx(),
+                        start = Offset(left, baseline + 4.dp.toPx()),
+                        end = Offset(right, baseline + 4.dp.toPx()),
+                        strokeWidth = 1.4.dp.toPx(),
                         cap = StrokeCap.Round
                     )
                     AnnotationStyle.WAVY -> {
-                        val amplitude = 1.8.dp.toPx()
-                        val y = baseline + 5.dp.toPx()
+                        val amplitude = 1.5.dp.toPx()
+                        val y = baseline + 4.dp.toPx()
                         val segments = AnnotationInk.wavySegments(right - left, 8.dp.toPx())
                         if (segments > 0) {
                             val path = Path()
@@ -725,7 +760,7 @@ private fun StyledQuote(
                                 x += step
                                 up = !up
                             }
-                            drawPath(path, ink, style = Stroke(1.5.dp.toPx(), cap = StrokeCap.Round))
+                            drawPath(path, ink, style = Stroke(1.3.dp.toPx(), cap = StrokeCap.Round))
                         }
                     }
                 }
@@ -735,10 +770,18 @@ private fun StyledQuote(
 }
 
 private const val QUOTE_MAX_CHARS = 200
+private const val QUOTE_COLLAPSED_LINES = 3
+
+/** 原文比讨论正文（[THREAD_FONT_SIZE]）小一档：大屏上宽幅摘录不再压过讨论。 */
+private val QUOTE_FONT_SIZE = 14.sp
+private val QUOTE_LINE_HEIGHT = 23.sp
+private val THREAD_FONT_SIZE = 16.sp
+private val THREAD_LINE_HEIGHT = 26.sp
 
 /**
- * 原文摘录：书里的字和讨论里的话必须一眼分开。原文是宋体、带划线、垫一层淡纸色、
- * 左上角一枚朱砂引号，上方一行「原文」小标；讨论用界面黑体，直接排在纸上。
+ * 原文摘录：书里的字和讨论里的话必须一眼分开。原文是小一号的宋体、带划线、垫一层淡纸色，
+ * 左缘一道朱砂细线，上方一行「原文」小标；讨论用界面黑体，直接排在纸上、字号更大。
+ * 默认折成三行，点摘录展开全文。[styleToggle] 放在小标行末，用来展开样式条。
  */
 @Composable
 private fun QuoteExcerpt(
@@ -746,40 +789,114 @@ private fun QuoteExcerpt(
     style: AnnotationStyle,
     ink: Color,
     palette: ReaderPalette,
+    styleToggle: (@Composable () -> Unit)?,
     modifier: Modifier = Modifier
 ) {
+    var expanded by rememberSaveable(text) { mutableStateOf(false) }
+    var overflowing by remember(text) { mutableStateOf(false) }
+    val expandable = expanded || overflowing
+    val seal = palette.seal
     Column(modifier = modifier.fillMaxWidth()) {
-        Text(
-            text = stringResource(R.string.discussion_quote_label),
-            style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 2.sp),
-            color = palette.muted,
-            modifier = Modifier.padding(bottom = 6.dp)
-        )
-        Box(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .background(palette.onBackground.copy(alpha = if (palette.isDark) 0.06f else 0.035f))
-                .padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 12.dp)
+                .heightIn(min = 28.dp)
+                .padding(bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "\u201C",
-                style = MaterialTheme.typography.displaySmall.copy(
-                    fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
-                    fontSize = 40.sp,
-                    lineHeight = 40.sp
-                ),
-                color = palette.seal.copy(alpha = 0.55f),
-                modifier = Modifier.offset(x = (-2).dp, y = (-8).dp)
+                text = stringResource(R.string.discussion_quote_label),
+                style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 2.sp),
+                color = palette.muted,
+                modifier = Modifier.weight(1f)
             )
+            styleToggle?.invoke()
+        }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(palette.onBackground.copy(alpha = if (palette.isDark) 0.06f else 0.035f))
+                .then(if (expandable) Modifier.clickable { expanded = !expanded } else Modifier)
+                .drawBehind {
+                    val inset = 10.dp.toPx()
+                    drawLine(
+                        color = seal.copy(alpha = 0.55f),
+                        start = Offset(0f, inset),
+                        end = Offset(0f, size.height - inset),
+                        strokeWidth = 2.5.dp.toPx()
+                    )
+                }
+                .padding(start = 14.dp, end = 12.dp, top = 9.dp, bottom = 9.dp)
+        ) {
             StyledQuote(
                 text = text,
                 style = style,
                 ink = ink,
                 palette = palette,
-                modifier = Modifier.padding(start = 18.dp)
+                maxLines = if (expanded) Int.MAX_VALUE else QUOTE_COLLAPSED_LINES,
+                onOverflowChange = { if (!expanded) overflowing = it }
             )
+            if (expandable) {
+                Text(
+                    text = stringResource(
+                        if (expanded) R.string.discussion_quote_collapse else R.string.discussion_quote_expand
+                    ),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = palette.muted,
+                    modifier = Modifier
+                        .align(Alignment.End)
+                        .padding(top = 2.dp)
+                )
+            }
         }
+    }
+}
+
+/** 原文标题行末的样式钮：一枚当前色点 + 样式名，点开 / 收起下面的样式条。 */
+@Composable
+private fun StyleToggleChip(
+    style: AnnotationStyle,
+    ink: Color,
+    expanded: Boolean,
+    palette: ReaderPalette,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(
+                if (expanded) palette.onBackground.copy(alpha = if (palette.isDark) 0.09f else 0.06f)
+                else Color.Transparent
+            )
+            .clickable(onClick = onClick)
+            .padding(start = 8.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp)
+    ) {
+        Box(
+            Modifier
+                .size(9.dp)
+                .clip(CircleShape)
+                .background(ink)
+        )
+        Text(
+            text = stringResource(
+                when (style) {
+                    AnnotationStyle.HIGHLIGHT -> R.string.annotation_style_highlight
+                    AnnotationStyle.UNDERLINE -> R.string.annotation_style_underline
+                    AnnotationStyle.WAVY -> R.string.annotation_style_wavy
+                }
+            ),
+            style = MaterialTheme.typography.labelMedium,
+            color = palette.muted
+        )
+        Icon(
+            if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+            contentDescription = stringResource(R.string.discussion_style_edit),
+            tint = palette.muted,
+            modifier = Modifier.size(16.dp)
+        )
     }
 }
 
@@ -893,12 +1010,12 @@ private fun InkDot(color: Color, selected: Boolean, palette: ReaderPalette, onCl
     )
 }
 
-/** 讨论正文：界面黑体、比正文略大一档的行高——它是对话，不是书。原文那段才用宋体。 */
+/** 讨论正文：界面黑体、比原文大一档——它是这张弹层的主体，是对话不是书。原文那段才用小号宋体。 */
 @Composable
 private fun ThreadText(content: String, palette: ReaderPalette) {
     val base = MaterialTheme.typography
     val talk = remember(base) {
-        base.copy(bodyMedium = base.bodyMedium.copy(fontSize = 15.sp, lineHeight = 24.sp))
+        base.copy(bodyMedium = base.bodyMedium.copy(fontSize = THREAD_FONT_SIZE, lineHeight = THREAD_LINE_HEIGHT))
     }
     MaterialTheme(colorScheme = MaterialTheme.colorScheme, shapes = MaterialTheme.shapes, typography = talk) {
         AiRichText(content = content, palette = palette)
@@ -994,7 +1111,7 @@ private fun ThreadComment(
                     modifier = Modifier.padding(start = 8.dp)
                 )
             }
-            Box(Modifier.padding(top = 2.dp)) { content() }
+            Column(Modifier.padding(top = 2.dp)) { content() }
             Row(
                 modifier = Modifier.padding(top = 2.dp),
                 horizontalArrangement = Arrangement.spacedBy(2.dp)
@@ -1038,13 +1155,15 @@ private fun AnnotationMediaContent(
 ) {
     if (media.isEmpty) return
     media.audioPath?.takeIf(String::isNotBlank)?.let { path ->
+        // 有语音就只给语音条，文字收在条内，点开才显示，避免同一句话说两遍。
         CompanionVoiceBubble(
             text = text,
             clip = VoiceClipState(path = path),
             palette = palette,
             onPrepare = {},
             onRegenerate = {},
-            onPlay = onPlayAudio
+            onPlay = onPlayAudio,
+            expandedContent = { ThreadText(text, palette) }
         )
     }
     media.illustrationId?.let { id ->
@@ -1109,7 +1228,7 @@ private fun StreamingReplyRow(
             if (streaming.text.isNotBlank()) {
                 val base = MaterialTheme.typography
                 val serif = remember(base) {
-                    base.copy(bodyMedium = base.bodyMedium.copy(fontSize = 15.sp, lineHeight = 24.sp))
+                    base.copy(bodyMedium = base.bodyMedium.copy(fontSize = THREAD_FONT_SIZE, lineHeight = THREAD_LINE_HEIGHT))
                 }
                 MaterialTheme(colorScheme = MaterialTheme.colorScheme, shapes = MaterialTheme.shapes, typography = serif) {
                     StreamingAiRichText(

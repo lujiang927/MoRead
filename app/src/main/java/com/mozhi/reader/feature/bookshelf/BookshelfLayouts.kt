@@ -94,6 +94,7 @@ internal fun BookGrid(
     collectionDragState: ShelfCollectionDragState,
     onShelfDrop: (BookEntity, ShelfDrop) -> Unit,
     onSetLayout: (ShelfLayout) -> Unit,
+    onSetGridColumns: (Int) -> Unit,
     onSetReadStateFilter: (BookReadState?) -> Unit,
     onSelectGroup: (Long?, Boolean) -> Unit,
     onToggleTagFilter: (Long) -> Unit,
@@ -106,7 +107,9 @@ internal fun BookGrid(
     onImport: () -> Unit
 ) {
     val gridState = rememberLazyGridState()
-    val tablet = rememberMoReadWindowWidth() != MoReadWindowWidth.COMPACT
+    val windowWidth = rememberMoReadWindowWidth()
+    val tablet = windowWidth != MoReadWindowWidth.COMPACT
+    val horizontalPadding = shelfGridHorizontalPaddingDp(windowWidth).dp
     val dockSearch = !tablet && navStyle() != NavStyle.BAR
     val searchFloating by remember(tablet, searchQuery.isBlank()) {
         derivedStateOf { gridState.firstVisibleItemIndex >= if (tablet && searchQuery.isBlank()) 2 else 1 }
@@ -118,15 +121,15 @@ internal fun BookGrid(
         )
     }
     LazyVerticalGrid(
-        columns = if (tablet) TabletShelfGridCells else ShelfGridCells,
+        columns = if (tablet) TabletShelfGridCells(state.gridColumns) else ShelfGridCells(state.gridColumns),
         state = gridState,
         modifier = Modifier
             .fillMaxSize()
             .background(if (tablet) MaterialTheme.colorScheme.background else Color.Transparent)
             .onGloballyPositioned { collectionDragState.setViewport(it.boundsInRoot()) }.testTag("shelf-scroll"),
         contentPadding = PaddingValues(
-            start = if (tablet) 48.dp else 20.dp, top = if (tablet) 30.dp else 18.dp, end = if (tablet) 48.dp else 20.dp,
-            bottom = MoReadLayoutPolicy.rootBottomPaddingDp(rememberMoReadWindowWidth()).dp
+            start = horizontalPadding, top = if (tablet) 30.dp else 18.dp, end = horizontalPadding,
+            bottom = MoReadLayoutPolicy.rootBottomPaddingDp(windowWidth).dp
         ),
         horizontalArrangement = Arrangement.spacedBy(if (tablet) 24.dp else 14.dp),
         verticalArrangement = Arrangement.spacedBy(if (tablet) 26.dp else 20.dp)
@@ -134,7 +137,7 @@ internal fun BookGrid(
         item(key = "shelf-top", span = { GridItemSpan(maxLineSpan) }) {
             Row(Modifier.fillMaxWidth().heightIn(min = 64.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.weight(1f)) { if (tablet) TabletLibraryTitle(state) else GreetingHeader() }
-                ShelfHeaderActions(state, onSetLayout, onSetReadStateFilter, onSetTagMatchMode,
+                ShelfHeaderActions(state, onSetLayout, onSetGridColumns, onSetReadStateFilter, onSetTagMatchMode,
                     onSetReadingOrderAffectsShelf, onClearFilter, onStartSelection, onOpenShelfTags, onImport)
             }
         }
@@ -214,6 +217,7 @@ internal fun BookList(
     collectionDragState: ShelfCollectionDragState,
     onShelfDrop: (BookEntity, ShelfDrop) -> Unit,
     onSetLayout: (ShelfLayout) -> Unit,
+    onSetGridColumns: (Int) -> Unit,
     onSetReadStateFilter: (BookReadState?) -> Unit,
     onSelectGroup: (Long?, Boolean) -> Unit,
     onToggleTagFilter: (Long) -> Unit,
@@ -252,7 +256,7 @@ internal fun BookList(
         item(key = "shelf-top") {
             Row(Modifier.fillMaxWidth().heightIn(min = 64.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.weight(1f)) { if (tablet) TabletLibraryTitle(state) else GreetingHeader() }
-                ShelfHeaderActions(state, onSetLayout, onSetReadStateFilter, onSetTagMatchMode,
+                ShelfHeaderActions(state, onSetLayout, onSetGridColumns, onSetReadStateFilter, onSetTagMatchMode,
                     onSetReadingOrderAffectsShelf, onClearFilter, onStartSelection, onOpenShelfTags, onImport)
             }
         }

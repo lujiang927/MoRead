@@ -114,6 +114,7 @@ data class ReaderSettings(
     val modernBackTextOpacity: Float = .18f,
     val modernCurlRadiusScale: Float = 1f,
     val shelfLayout: ShelfLayout = ShelfLayout.GRID,
+    val shelfGridColumns: Int = 0,
     val shelfBookOrder: List<Long> = emptyList(),
     val shelfBookOrderReadAnchor: Long = 0L,
     val readingOrderAffectsShelf: Boolean = true,

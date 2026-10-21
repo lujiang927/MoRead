@@ -468,7 +468,7 @@ fun ListenPlayerScreen(
     if (showChapters) {
         MoReadBottomSheet(
             onDismissRequest = { showChapters = false },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         ) {
             ListenChapterSheet(
                 chapters = chapters,

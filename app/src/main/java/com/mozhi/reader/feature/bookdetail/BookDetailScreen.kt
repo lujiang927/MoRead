@@ -211,7 +211,7 @@ fun BookDetailScreen(
 
     MoReadBackdrop {
         val book = state.book
-        if (state.isLoading || book == null) {
+        if (book == null) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 if (state.isLoading) CircularProgressIndicator()
                 else Text("书籍不存在", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -298,64 +298,69 @@ fun BookDetailScreen(
                     chapterTitle = chapterTitle
                 )
             }
-            item(key = "detail-glance") {
-                DetailGlance(
-                    totalDurationMs = state.totalDurationMs,
-                    readingDays = state.readingDays,
-                    streakDays = state.streakDays,
-                    modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp)
-                )
-            }
-            item(key = "detail-assets") {
-                ReadingAssetsEntry(
-                    noteCount = state.notes.size,
-                    annotationCount = state.annotations.size,
-                    illustrationCount = state.illustrations.size,
-                    bookmarkCount = state.bookmarks.size,
-                    onNotes = { showAllNotes = true },
-                    onAnnotations = { showAnnotations = true },
-                    onGallery = { showGallery = true },
-                    onBookmarks = { showBookmarks = true },
-                    modifier = Modifier.padding(horizontal = 20.dp)
-                )
-            }
-            item(key = "detail-index") {
-                state.embeddingProgress?.let { progress ->
-                    BookIndexCard(
-                        progress = progress,
-                        onEnabledChange = viewModel::setBookIndexEnabled,
-                        onRetry = viewModel::retryBookIndex,
-                        onRebuild = viewModel::rebuildBookIndex,
+            if (state.isLoading) item(key = "detail-loading") {
+                LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 20.dp))
+            } else {
+                item(key = "detail-glance") {
+                    DetailGlance(
+                        totalDurationMs = state.totalDurationMs,
+                        readingDays = state.readingDays,
+                        streakDays = state.streakDays,
+                        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp)
+                    )
+                }
+                item(key = "detail-assets") {
+                    ReadingAssetsEntry(
+                        noteCount = state.notes.size,
+                        annotationCount = state.annotations.size,
+                        illustrationCount = state.illustrations.size,
+                        bookmarkCount = state.bookmarks.size,
+                        onNotes = { showAllNotes = true },
+                        onAnnotations = { showAnnotations = true },
+                        onGallery = { showGallery = true },
+                        onBookmarks = { showBookmarks = true },
+                        modifier = Modifier.padding(horizontal = 20.dp)
+                    )
+                }
+                item(key = "detail-index") {
+                    state.embeddingProgress?.let { progress ->
+                        BookIndexCard(
+                            progress = progress,
+                            onEnabledChange = viewModel::setBookIndexEnabled,
+                            onRetry = viewModel::retryBookIndex,
+                            onRebuild = viewModel::rebuildBookIndex,
+                            modifier = Modifier.padding(horizontal = 20.dp)
+                        )
+                    }
+                }
+                item(key = "detail-annotation-settings") {
+                    BookAnnotationLimitsCard(
+                        autonomy = state.autonomy,
+                        bookId = bookId,
+                        onOpen = { onOpenAnnotationLimits(bookId) },
+                        modifier = Modifier.padding(horizontal = 20.dp)
+                    )
+                }
+                item(key = "detail-notes") {
+                    NotesSection(
+                        notes = state.notes,
+                        onNoteClick = { selectedNote = it },
+                        onShowAll = { showAllNotes = true },
+                        onCreate = {
+                            editingNote = null
+                            showNoteEditor = true
+                        },
+                        modifier = Modifier.padding(horizontal = 20.dp)
+                    )
+                }
+                item(key = "detail-more") {
+                    MoreBookDetailsEntry(
+                        onClick = { showMoreInfo = true },
                         modifier = Modifier.padding(horizontal = 20.dp)
                     )
                 }
             }
-            item(key = "detail-annotation-settings") {
-                BookAnnotationLimitsCard(
-                    autonomy = state.autonomy,
-                    bookId = bookId,
-                    onOpen = { onOpenAnnotationLimits(bookId) },
-                    modifier = Modifier.padding(horizontal = 20.dp)
-                )
-            }
-            item(key = "detail-notes") {
-                NotesSection(
-                    notes = state.notes,
-                    onNoteClick = { selectedNote = it },
-                    onShowAll = { showAllNotes = true },
-                    onCreate = {
-                        editingNote = null
-                        showNoteEditor = true
-                    },
-                    modifier = Modifier.padding(horizontal = 20.dp)
-                )
-            }
-            item(key = "detail-more") {
-                MoreBookDetailsEntry(
-                    onClick = { showMoreInfo = true },
-                    modifier = Modifier.padding(horizontal = 20.dp)
-                )
-            }        }
+        }
         }
         }
 

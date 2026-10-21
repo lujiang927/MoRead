@@ -1,5 +1,8 @@
 package com.mozhi.reader.feature.importer
 
+import com.mozhi.reader.core.epub.EpubLayoutDocumentParser
+import com.mozhi.reader.core.epub.EpubPackageInspector
+import com.mozhi.reader.core.epub.EpubTextExtractor
 import android.app.Application
 import android.content.Context
 import android.content.ContextWrapper
@@ -132,10 +135,12 @@ class EpubImportPipelineTest {
         paths.split(File.pathSeparator).filter(String::isNotBlank).forEachIndexed { index, path ->
             val source = File(path)
             assertTrue("Configured EPUB fixture does not exist", source.isFile)
+            val sourceFingerprint = com.mozhi.reader.core.importer.SourceFingerprints.of(source)
             val bookId = index + 1L
             val text = slot<List<ChapterTextInput>>()
+            val importedBook = slot<com.mozhi.reader.core.database.entity.BookEntity>()
             val library = mockk<LibraryRepository>(relaxed = true)
-            coEvery { library.insertBook(any(), any(), any()) } returns bookId
+            coEvery { library.insertBook(capture(importedBook), any(), any()) } returns bookId
             coEvery { library.findBookBySourceHash(any()) } returns null
             coEvery { library.getEpubBooksWithoutSource() } returns emptyList()
             coEvery { library.materializeBookText(bookId, capture(text), false) } just Runs
@@ -145,6 +150,13 @@ class EpubImportPipelineTest {
                 mockk(), ReadiumServices(context), library
             )
             assertEquals(bookId, importer.importDirectly(Uri.fromFile(source)))
+            assertEquals(sourceFingerprint.sha256, importedBook.captured.sourceSha256)
+            assertEquals(sourceFingerprint.size, importedBook.captured.sourceByteSize)
+            assertEquals(sourceFingerprint, com.mozhi.reader.core.importer.SourceFingerprints.of(source))
+            java.util.zip.ZipFile(importedBook.captured.epubPath).use { zip ->
+                val names = zip.entries().asSequence().map { it.name }.toList()
+                assertEquals("Imported archive must also open on Android", names.size, names.toSet().size)
+            }
             coVerify(exactly = 1) { library.markTextReady(bookId) }
             val chapters = text.captured
             assertEquals(EpubPackageInspector().inspect(source).spine.count { it.linear }, chapters.size)
@@ -156,8 +168,30 @@ class EpubImportPipelineTest {
                 assertTrue(body.substring(image.charOffset).startsWith("［图片］"))
                 assertTrue(File(image.imagePath).isFile || com.mozhi.reader.core.library.EpubArchiveAsset.parse(image.imagePath)?.archive?.isFile == true)
             }
-            chapters.forEach { chapter ->
-                assertEquals(chapter.body.length, layouts.readChapter(bookId, chapter.index)!!.document.textLength)
+            // Verify every lazy parse against canonical text without filling/evicting the disk
+            // cache thousands of times. Exercise cache/storage access separately below.
+            val storedPackage = kotlinx.serialization.json.Json.decodeFromString(
+                com.mozhi.reader.core.library.EpubLayoutPackage.serializer(),
+                File(context.filesDir, "book-layout/$bookId/${BookLayoutStore.INDEX_FILE}").readText()
+            )
+            val references = storedPackage.chapters.associateBy { it.chapterIndex }
+            val resources = storedPackage.resources.associateBy { it.href }
+            val stylesheetText = storedPackage.stylesheets.associate { it.href to it.css }
+            val parser = EpubLayoutDocumentParser()
+            java.util.zip.ZipFile(importedBook.captured.epubPath).use { zip ->
+                chapters.forEach { chapter ->
+                    val href = references.getValue(chapter.index).href
+                    val archivePath = resources[href]?.archivePath ?: href
+                    val bytes = zip.getInputStream(zip.getEntry(archivePath)).use { it.readBytes() }
+                    val parsed = parser.parseWithText(bytes, chapter.index, href, stylesheetText)
+                    assertTrue("Canonical text changed in chapter ${chapter.index}", parsed.text == chapter.body)
+                }
+            }
+            val cachedIndices = (listOf(chapters.first().index, chapters.last().index, chapters[chapters.size / 2].index) +
+                images.take(6).map { it.chapterIndex }).distinct()
+            cachedIndices.forEach { chapterIndex ->
+                val chapter = chapters.first { it.index == chapterIndex }
+                assertEquals(chapter.body.length, layouts.readChapter(bookId, chapter.index, chapter.body)!!.document.textLength)
             }
             println("EPUB pipeline: book=$index chapters=${chapters.size} images=${images.size}")
 

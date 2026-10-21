@@ -45,6 +45,7 @@ class ImportPreviewViewModel @Inject constructor(
 ) : ViewModel() {
     private val sessionId: String = checkNotNull(savedStateHandle["sessionId"])
     private val workManager = WorkManager.getInstance(context)
+    private val customRegexTooLargeMessage = context.getString(com.mozhi.reader.R.string.import_custom_rule_too_large)
     private val mutableState = MutableStateFlow(ImportPreviewUiState())
     val uiState = mutableState.asStateFlow()
     private val eventChannel = Channel<ImportPreviewEvent>(Channel.BUFFERED)
@@ -132,7 +133,8 @@ class ImportPreviewViewModel @Inject constructor(
                     it.copy(
                         isWorking = false,
                         progressMessage = null,
-                        errorMessage = error.message ?: "AI 章节识别失败"
+                        errorMessage = if (error is TxtRegexInputTooLargeException) customRegexTooLargeMessage
+                            else error.message ?: "AI 章节识别失败"
                     )
                 }
             }
@@ -299,7 +301,8 @@ class ImportPreviewViewModel @Inject constructor(
                             isWorking = false,
                             progressMessage = null,
                             progressFraction = null,
-                            errorMessage = error.message ?: "重新识别失败"
+                            errorMessage = if (error is TxtRegexInputTooLargeException) customRegexTooLargeMessage
+                                else error.message ?: "重新识别失败"
                         )
                     }
                 }

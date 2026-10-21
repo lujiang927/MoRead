@@ -1,5 +1,6 @@
 package com.mozhi.reader.feature.importer
 
+import com.mozhi.reader.core.epub.EpubTextExtractor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Test

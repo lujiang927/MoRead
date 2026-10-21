@@ -7,6 +7,7 @@ import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Bookmarks
 import androidx.compose.material.icons.outlined.BorderColor
 import androidx.compose.material.icons.outlined.Brush
+import androidx.compose.material.icons.outlined.BubbleChart
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material.icons.outlined.Image
@@ -204,6 +205,18 @@ fun ChatDisplaySettingsScreen(onBack: () -> Unit, viewModel: SettingsViewModel) 
                     subtitle = stringResource(R.string.settings_token_usage_summary),
                     checked = state.companionTokenUsageEnabled,
                     onCheckedChange = viewModel::setCompanionTokenUsage
+                )
+            }
+        }
+        item {
+            val orbVisible by viewModel.companionOrbVisible.collectAsStateWithLifecycle()
+            MoReadSection(title = stringResource(R.string.settings_reader_entry_section), icon = Icons.AutoMirrored.Outlined.MenuBook, tone = SemanticSlot.READING) {
+                MoReadSwitchRow(
+                    icon = Icons.Outlined.BubbleChart,
+                    title = stringResource(R.string.settings_companion_orb),
+                    subtitle = stringResource(R.string.settings_companion_orb_summary),
+                    checked = orbVisible,
+                    onCheckedChange = viewModel::setCompanionOrbVisible
                 )
             }
         }

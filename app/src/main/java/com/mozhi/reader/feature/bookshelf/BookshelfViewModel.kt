@@ -35,6 +35,7 @@ data class BookshelfUiState(
     val books: List<BookEntity> = emptyList(),
     val allBooks: List<BookEntity> = emptyList(),
     val layout: ShelfLayout = ShelfLayout.GRID,
+    val gridColumns: Int = 0,
     val readingOrderAffectsShelf: Boolean = true,
     val filter: ShelfFilter = ShelfFilter(),
     val tags: List<BookTagEntity> = emptyList(),
@@ -136,6 +137,7 @@ class BookshelfViewModel @Inject constructor(
         BookshelfBaseState(
             books = books,
             layout = settings.shelfLayout,
+            gridColumns = settings.shelfGridColumns,
             shelfBookOrder = settings.shelfBookOrder,
             shelfBookOrderReadAnchor = settings.shelfBookOrderReadAnchor,
             readingOrderAffectsShelf = settings.readingOrderAffectsShelf,
@@ -165,6 +167,7 @@ class BookshelfViewModel @Inject constructor(
             books = filterShelfBooks(orderedBooks, organization.tagRefs, effectiveFilter),
             allBooks = orderedBooks,
             layout = base.layout,
+            gridColumns = base.gridColumns,
             readingOrderAffectsShelf = base.readingOrderAffectsShelf,
             filter = effectiveFilter,
             tags = organization.tags,
@@ -255,6 +258,10 @@ class BookshelfViewModel @Inject constructor(
 
     fun setLayout(layout: ShelfLayout) {
         viewModelScope.launch { settingsRepository.setShelfLayout(layout) }
+    }
+
+    fun setGridColumns(value: Int) {
+        viewModelScope.launch { settingsRepository.setShelfGridColumns(value) }
     }
 
     fun saveShelfOrder(visibleBookIds: List<Long>) {
@@ -467,6 +474,7 @@ class BookshelfViewModel @Inject constructor(
 private data class BookshelfBaseState(
     val books: List<BookEntity>,
     val layout: ShelfLayout,
+    val gridColumns: Int,
     val shelfBookOrder: List<Long>,
     val shelfBookOrderReadAnchor: Long,
     val readingOrderAffectsShelf: Boolean,

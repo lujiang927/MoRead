@@ -59,7 +59,7 @@ class ReaderViewModelPersistenceTest {
 
     @Test
     fun epubNotePreviewContainsNoteTextAfterNumberAndPreservesJumpAnchor() {
-        val parsed = com.mozhi.reader.feature.importer.EpubLayoutDocumentParser().parseWithText(
+        val parsed = com.mozhi.reader.core.epub.EpubLayoutDocumentParser().parseWithText(
             """<html><body><p>Some text.</p><p><a id="note1">[1]</a> A complete explanation.</p><p id="note2">[2] Another note.</p></body></html>""".toByteArray(),
             0, "chapter.xhtml", emptyMap())
         val layout = com.mozhi.reader.core.library.EpubLayoutChapterBundle(parsed.document, emptyMap(), emptyMap(), dom = parsed.dom)

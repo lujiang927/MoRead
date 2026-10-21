@@ -1,5 +1,7 @@
 package com.mozhi.reader.feature.importer
 
+import com.mozhi.reader.core.epub.EpubLegacyStyleBridge
+import com.mozhi.reader.core.epub.EpubStylesheetSource
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
 import org.junit.Test

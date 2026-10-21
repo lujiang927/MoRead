@@ -119,7 +119,12 @@ data class ProactiveAnnotationRequest(
     /** Lookahead shares the worker by candidate slot, without reducing the chapter's quota. */
     val maxSlotsPerPass: Int = Int.MAX_VALUE,
     /** Failed slots already visited in this generation round must wait for the bounded retry. */
-    val visitedParagraphEnds: Set<Int> = emptySet()
+    val visitedParagraphEnds: Set<Int> = emptySet(),
+    /**
+     * 读者此刻在本章的原文位置（不在本章时给 null）。每格开工前重读一次：生成追不上翻页时，
+     * 读者身后的格子写好也只会亮在翻过去的页上，跳过它们，把调用留给前面还没读到的段落。
+     */
+    val readerOffset: (suspend () -> Int?)? = null
 )
 
 data class ProactiveAnnotationGenerationResult(
@@ -162,9 +167,13 @@ class ProactiveAnnotationService @Inject constructor(
         var preparedContext: PreparedAnnotationContext? = null
         var slots = 0
         val visited = mutableSetOf<Int>()
-        for (slot in ProactiveAnnotationParagraphs.buckets(request.body, request.candidateLimit, request.startAt)) {
+        for (bucket in ProactiveAnnotationParagraphs.generationBuckets(request.body, request.candidateLimit, request.startAt)) {
           // 一格已有段评（含旧版按整段记账的终点）就跳过；正选写坏了才换同格次选，超时与请求错误不换。
-          if (slot.any { it.end in request.doneParagraphEnds || it.end in request.visitedParagraphEnds }) continue
+          if (bucket.any { it.end in request.doneParagraphEnds || it.end in request.visitedParagraphEnds }) continue
+          // 读者已经翻过的候选不再生成；整格都在身后就留给下一格，不记失败也不记已访问。
+          val frontier = request.readerOffset?.invoke()
+          val slot = if (frontier == null) bucket else bucket.filter { it.start >= frontier }
+          if (slot.isEmpty()) continue
           if (slots >= request.maxSlotsPerPass.coerceAtLeast(1)) {
               return ProactiveAnnotationGenerationResult(failed, stopped = false, hasMore = true, visitedParagraphEnds = visited.toSet())
           }
@@ -268,7 +277,7 @@ class ProactiveAnnotationService @Inject constructor(
           }
           if (!slotFilled) failed = true
           slots++
-          visited += slot.map { it.end }
+          visited += bucket.map { it.end }
         }
         return ProactiveAnnotationGenerationResult(failed, stopped = false, visitedParagraphEnds = visited.toSet())
     }

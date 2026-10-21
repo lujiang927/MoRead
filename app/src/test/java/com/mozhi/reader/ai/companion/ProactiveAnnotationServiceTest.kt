@@ -100,6 +100,40 @@ class ProactiveAnnotationServiceTest {
         coVerify(exactly = 1) { contextRepository.prepare(1, 3) }
     }
 
+    @Test fun unlimitedSlicesReachTheTailEarlyThenFillAllMissingParagraphsWithoutDuplicateCalls() = runTest {
+        val chapter = (0..39).joinToString("\n") { "第${it}段正文：" + "河岸的灯火映在水面，远处钟声缓缓响起。".repeat(5) }
+        val targets = ProactiveAnnotationParagraphs.split(chapter)
+        val done = targets.take(2).map { it.end }.toMutableSet()
+        val visited = mutableSetOf<Int>()
+        val rows = mutableListOf<AnnotationEntity>()
+        val messages = mutableListOf<List<ChatMessage>>()
+        coEvery { client.chat(capture(messages), any()) } answers {
+            val target = messages.last().last().content.orEmpty().substringAfterLast("唯一目标段落：\n")
+            """{"quote":"$target","note":"评论"}"""
+        }
+        do {
+            val result = service.generateForChapter(request.copy(body = chapter, candidateLimit = Int.MAX_VALUE,
+                maxSlotsPerPass = 3, doneParagraphEnds = done.toSet(), visitedParagraphEnds = visited.toSet()),
+                { permit }, { _, _ -> }, { row, end, _ ->
+                    assertTrue(done.add(end))
+                    rows += row
+                    true
+                })
+            assertFalse(result.failed)
+            assertFalse(result.stopped)
+            visited += result.visitedParagraphEnds
+        } while (result.hasMore)
+        assertTrue(rows.take(6).any { it.startCharOffset > chapter.length * 4 / 5 })
+        assertEquals(targets.map { it.end }.toSet(), done)
+        assertEquals(targets.size - 2, messages.size)
+        rows.zip(messages).forEach { (row, sent) ->
+            val prefix = sent.last().content.orEmpty().substringAfter("正文前缀（只到目标结束）：\n")
+                .substringBefore("\n\n唯一目标段落：\n")
+            assertTrue(chapter.take(row.sourceScopeCharOffset!!).endsWith(prefix))
+            assertEquals(chapter.substring(row.startCharOffset, row.endCharOffset), row.selectedText)
+        }
+    }
+
     @Test fun failedSlotDoesNotBlockLookaheadOrRepeatUntilTheNextGenerationRound() = runTest {
         var calls = 0
         coEvery { client.chat(any(), any()) } answers {
@@ -369,5 +403,18 @@ class ProactiveAnnotationServiceTest {
         service.generateForChapter(request.copy(startAt = first.length + 1), { permit }, { _, _ -> }, { row, _, _ -> rows += row; true })
         assertEquals(1, requests.size)
         assertEquals(second, rows.single().selectedText)
+    }
+
+    @Test fun slotsTheReaderHasAlreadyPassedAreSkippedWithoutCountingAsFailures() = runTest {
+        val requests = mutableListOf<List<ChatMessage>>()
+        coEvery { client.chat(capture(requests), any()) } returns """{"quote":"$second","note":"评论"}"""
+        val rows = mutableListOf<AnnotationEntity>()
+        // 生成开始时读者还在章首，第一格之前读者已经翻到第二段。
+        val result = service.generateForChapter(request.copy(readerOffset = { first.length + 1 }),
+            { permit }, { _, _ -> }, { row, _, _ -> rows += row; true })
+        assertEquals(1, requests.size)
+        assertFalse(result.failed)
+        assertEquals(second, rows.single().selectedText)
+        assertEquals(setOf(body.length), result.visitedParagraphEnds)
     }
 }

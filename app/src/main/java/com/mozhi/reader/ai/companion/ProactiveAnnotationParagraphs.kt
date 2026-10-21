@@ -12,6 +12,7 @@ object ProactiveAnnotationParagraphs {
      */
     const val MAX_TARGET_CHARS = 200
     private const val SCORE_LENGTH_CAP = 200
+    private const val COVERAGE_INTERVAL_CHARS = 800
 
     private val heading = Regex("^(?:第.{1,20}[章节卷回]|序章|序言|序幕|楔子|前言|后记|尾声|chapter\\s+(?:[0-9]+|[ivxlcdm]+)\\b).*", RegexOption.IGNORE_CASE)
     internal fun isHeading(line: String): Boolean = heading.matches(line.trim())
@@ -44,6 +45,23 @@ object ProactiveAnnotationParagraphs {
 
     fun candidates(body: String, limit: Int, from: Int = 0): List<ProactiveAnnotationParagraph> =
         buckets(body, limit, from).map { it.first() }
+
+    /**
+     * 不限条数时先在各个正文区间写一段，再回头补各区间的下一段。逐段从章首写到章尾会让
+     * 尚未完成的预生成只有开头有段评；这里仅改变调用顺序，候选总数和每段的前文边界不变。
+     * 区间固定在本轮起点，不能随已完成段落或翻页重新分组，否则切片续跑会重复或漏段。
+     */
+    fun generationBuckets(body: String, limit: Int, from: Int = 0): List<List<ProactiveAnnotationParagraph>> {
+        if (limit != Int.MAX_VALUE) return buckets(body, limit, from)
+        val start = from.coerceIn(0, body.length)
+        val groups = split(body).filter { it.start >= start }
+            .groupBy { (it.start - start) / COVERAGE_INTERVAL_CHARS }.values.toList()
+        return buildList {
+            for (row in 0 until (groups.maxOfOrNull { it.size } ?: 0)) {
+                for (group in groups) group.getOrNull(row)?.let { add(listOf(it)) }
+            }
+        }
+    }
 
     /**
      * 按原文字符把 [from] 之后的正文均分成 [limit] 个区间，每个区间内的候选按分数从高到低排。

@@ -6,6 +6,7 @@ import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 import org.readium.r2.shared.publication.Publication
+import org.readium.r2.shared.util.ErrorException
 import org.readium.r2.shared.util.asset.AssetRetriever
 import org.readium.r2.shared.util.asset.ContainerAsset
 import org.readium.r2.shared.util.getOrElse
@@ -32,7 +33,7 @@ class ReadiumServices @Inject constructor(
     suspend fun open(file: File, allowUserInteraction: Boolean = false): Publication {
         val asset = assetRetriever
             .retrieve(file.absoluteFile.toUrl(isDirectory = false))
-            .getOrElse { error -> throw ReadiumOpenException(error.toString()) }
+            .getOrElse { error -> throw ReadiumOpenException(error) }
 
         val compatibleAsset = try {
             if (asset is ContainerAsset && file.extension.equals("epub", ignoreCase = true)) {
@@ -45,7 +46,7 @@ class ReadiumServices @Inject constructor(
         return try {
             publicationOpener
                 .open(compatibleAsset, allowUserInteraction = allowUserInteraction)
-                .getOrElse { error -> throw ReadiumOpenException(error.toString()) }
+                .getOrElse { error -> throw ReadiumOpenException(error) }
         } catch (error: Throwable) {
             compatibleAsset.close()
             throw error
@@ -53,4 +54,5 @@ class ReadiumServices @Inject constructor(
     }
 }
 
-class ReadiumOpenException(message: String) : Exception(message)
+class ReadiumOpenException(error: org.readium.r2.shared.util.Error) :
+    Exception(error.message, ErrorException(error))

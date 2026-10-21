@@ -736,7 +736,8 @@ fun MoReadApp(
                     )
                     else -> null
                 },
-                collapsible = currentRoute == RootDestination.Bookshelf.route,
+                // 四个根页都随滚动收放：下滑收成一粒让出内容，上滑或点一下展开。
+                collapsible = isRootRoute(currentRoute),
                 onSelect = selectRoot
             )
             AppUpdatePrompt()
@@ -756,7 +757,7 @@ internal fun MoReadNavigationDock(
     modifier: Modifier = Modifier,
     dockState: RootDockState? = null,
     /** 非空时在舱右侧显示书架搜索（仅书架页）。 */
-    /** 舱右侧的上下文动作（书架搜索 / 伴读新建），null = 留空但仍占位。 */
+    /** 舱右侧的上下文动作（书架搜索 / 伴读新建），null = 没有钮，舱拉满整行。 */
     trailing: DockAction? = null,
     collapsible: Boolean = false,
     onSelect: (RootDestination) -> Unit
@@ -796,7 +797,7 @@ internal fun AdaptiveNavDock(
     modifier: Modifier = Modifier,
     selectedRoute: String?,
     dockState: RootDockState? = null,
-    /** 舱右侧的上下文动作（书架搜索 / 伴读新建），null = 留空但仍占位。 */
+    /** 舱右侧的上下文动作（书架搜索 / 伴读新建），null = 没有钮，舱拉满整行。 */
     trailing: DockAction? = null,
     collapsible: Boolean = false,
     onSelect: (RootDestination) -> Unit

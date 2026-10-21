@@ -19,10 +19,12 @@ class ProactiveAnnotationSchedulerTest {
         assertEquals(listOf(7, 8), annotationChapterRange(7, 5, 8).toList())
         assertTrue(annotationChapterRange(9, 5, 8).isEmpty())
     }
-    @Test fun durableSuccessNeverRetriesAndFailureHasTwoAttemptCeiling() {
+    @Test fun completedJobsRequireMissingCandidatesAndFailuresKeepTwoAttemptCeiling() {
         assertTrue(job.canAttempt())
         assertFalse(job.copy(attempts = 2).canAttempt())
         assertFalse(job.copy(status = "DONE").canAttempt())
+        assertTrue(job.copy(status = "DONE").canAttempt(hasRemainingCandidates = true))
+        assertFalse(job.copy(status = "DONE", attempts = 2).canAttempt(hasRemainingCandidates = true))
     }
     @Test fun soleWorkerCanResumeInterruptedPendingImmediately() {
         assertTrue(job.copy(status = "PENDING").canAttempt())

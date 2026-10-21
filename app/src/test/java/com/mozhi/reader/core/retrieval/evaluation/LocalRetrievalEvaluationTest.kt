@@ -5,8 +5,8 @@ import com.mozhi.reader.ai.agent.loadReadableCorpus
 import com.mozhi.reader.ai.agent.parseChapterSearchBounds
 import com.mozhi.reader.core.library.LibraryRepository
 import com.mozhi.reader.core.retrieval.*
-import com.mozhi.reader.feature.importer.EpubLayoutDocumentParser
-import com.mozhi.reader.feature.importer.EpubPackageInspector
+import com.mozhi.reader.core.epub.EpubLayoutDocumentParser
+import com.mozhi.reader.core.epub.EpubPackageInspector
 import java.io.File
 import java.security.MessageDigest
 import java.util.zip.ZipFile

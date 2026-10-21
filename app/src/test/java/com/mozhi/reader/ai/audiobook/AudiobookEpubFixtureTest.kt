@@ -1,7 +1,7 @@
 package com.mozhi.reader.ai.audiobook
 
-import com.mozhi.reader.feature.importer.EpubPackageInspector
-import com.mozhi.reader.feature.importer.EpubLayoutDocumentParser
+import com.mozhi.reader.core.epub.EpubPackageInspector
+import com.mozhi.reader.core.epub.EpubLayoutDocumentParser
 import java.io.File
 import java.util.zip.ZipFile
 import org.junit.Assert.*

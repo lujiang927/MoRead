@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.IosShare
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -30,16 +31,22 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil3.compose.AsyncImage
+import com.mozhi.reader.R
 import com.mozhi.reader.core.database.entity.ConversationEntity
 import com.mozhi.reader.core.database.entity.MessageEntity
 import com.mozhi.reader.ui.components.blockSheetDrag
@@ -60,6 +67,8 @@ internal fun CompanionConversationSheet(
     onRenameConversation: (ConversationEntity) -> Unit,
     onDeleteConversation: (ConversationEntity) -> Unit
 ) {
+    // 存 id 而非实体：系统文件选择器期间若发生配置变更，弹窗要能按 id 原样恢复并接住回传结果。
+    var exportingId by rememberSaveable { mutableStateOf<Long?>(null) }
     MoReadBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -109,6 +118,13 @@ internal fun CompanionConversationSheet(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
+                        IconButton(onClick = { exportingId = conversation.id }) {
+                            Icon(
+                                Icons.Outlined.IosShare,
+                                contentDescription = stringResource(R.string.companion_export_action),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                         IconButton(onClick = { onRenameConversation(conversation) }) {
                             Icon(
                                 Icons.Outlined.Edit,
@@ -127,6 +143,9 @@ internal fun CompanionConversationSheet(
                 }
             }
         }
+    }
+    conversations.firstOrNull { it.id == exportingId }?.let { conversation ->
+        ConversationExportDialog(conversation, onDismiss = { exportingId = null })
     }
 }
 

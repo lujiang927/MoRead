@@ -257,7 +257,7 @@ private fun String.isSuccessfulToolResult(): Boolean {
         !value.contains("还没有建成向量索引")
 }
 
-private fun toolDisplayName(name: String): String = when (name) {
+internal fun toolDisplayName(name: String): String = when (name) {
     "get_reading_progress" -> "查询阅读进度"
     "search_book" -> "检索书中原文"
     "read_book_section" -> "读取指定已读章节"

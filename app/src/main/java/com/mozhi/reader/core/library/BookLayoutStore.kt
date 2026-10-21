@@ -6,9 +6,11 @@ import com.mozhi.reader.core.epub.css.CssTokenizer
 import com.mozhi.reader.core.epub.dom.EpubDomChapter
 import com.mozhi.reader.core.epub.dom.EpubDomNode
 import com.mozhi.reader.core.epub.dom.EpubV9DomAdapter
-import com.mozhi.reader.feature.importer.EpubLayoutDocumentParser
+import com.mozhi.reader.core.epub.EpubLayoutDocumentParser
+import com.mozhi.reader.core.epub.EpubChapterFallback
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
+import java.io.IOException
 import java.security.MessageDigest
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
@@ -41,7 +43,11 @@ class BookLayoutStore @Inject constructor(
         val sorted = chapters.sortedBy(EpubLayoutChapterInput::chapterIndex)
         require(sorted.map { it.chapterIndex } == sorted.indices.toList()) { "EPUB 章节索引不连续" }
         val refs = sorted.map { EpubLayoutChapterRef(it.chapterIndex, it.href, it.document.textLength, "", it.document.immersivePage) }
-        storeArchiveIndex(bookId, epubFile, layoutPackage.copy(chapters = refs))
+        val fallbacks = sorted.flatMap { it.document.diagnostics }
+            .filter { it.code == EpubChapterFallback.DIAGNOSTIC_CODE }
+        storeArchiveIndex(bookId, epubFile, layoutPackage.copy(
+            chapters = refs, diagnostics = (layoutPackage.diagnostics + fallbacks).distinct()
+        ))
     }
 
     /** Upgrade existing indexes without reparsing the book or rewriting canonical text. */
@@ -260,13 +266,16 @@ class BookLayoutStore @Inject constructor(
                         kotlin.math.abs((face.weight ?: 400) - 400) + if (face.italic) 1000 else 0
                     }.filePath
                 }
+            val textFallback = EpubChapterFallback.isTextFallback(chapter)
             EpubLayoutChapterBundle(
                 document = chapter,
                 resourcePaths = paths,
                 fontPaths = fonts,
                 fontFaces = fontFaces,
-                dom = dom,
-                stylesheets = layoutPackage.stylesheets
+                // A book-wide stylesheet must not route an empty fallback DOM to the rich
+                // engine, which would render no content. Text and inline images use the normal path.
+                dom = dom.takeUnless { textFallback },
+                stylesheets = if (textFallback) emptyList() else layoutPackage.stylesheets
             )
         }
 
@@ -429,8 +438,13 @@ class BookLayoutStore @Inject constructor(
     private fun directory(bookId: Long): File = File(context.filesDir, "$ROOT_DIRECTORY/$bookId")
 
     private fun safeChild(root: File, relativePath: String): File? {
-        val child = File(root, relativePath).canonicalFile
-        return child.takeIf { it.toPath().startsWith(root.canonicalFile.toPath()) }
+        return try {
+            val child = File(root, relativePath).canonicalFile
+            child.takeIf { it.toPath().startsWith(root.canonicalFile.toPath()) }
+        } catch (_: IOException) {
+            // Archive entry names may be illegal on the host filesystem.
+            null
+        }
     }
 
     private fun normalizeArchivePath(path: String): String = path.replace('\\', '/').removePrefix("./")

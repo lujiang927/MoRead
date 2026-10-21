@@ -15,16 +15,20 @@ object SourceFingerprints {
     fun of(file: File): SourceFingerprint = file.inputStream().use { input -> copy(input, null) }
 
     /** 边复制边计算，大文件不需要读两遍；[output] 为 null 时只计算。 */
-    fun copy(input: InputStream, output: OutputStream?): SourceFingerprint {
+    fun copy(input: InputStream, output: OutputStream?, maxBytes: Long = Long.MAX_VALUE,
+        checkActive: () -> Unit = {}, onProgress: (Long) -> Unit = {}): SourceFingerprint {
         val digest = MessageDigest.getInstance("SHA-256")
         val buffer = ByteArray(64 * 1024)
         var size = 0L
         while (true) {
+            checkActive()
             val read = input.read(buffer)
             if (read < 0) break
+            require(size + read <= maxBytes) { "TXT 文件超过 200 MB，暂不支持导入" }
             digest.update(buffer, 0, read)
             output?.write(buffer, 0, read)
             size += read
+            onProgress(size)
         }
         return SourceFingerprint(hex(digest.digest()), size)
     }

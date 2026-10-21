@@ -132,6 +132,16 @@ class BookDetailNavigationTest {
         }
     }
 
+    @Test fun bookSummaryAppearsBeforeSecondaryContentFinishesLoading() {
+        state.value = state.value.copy(isLoading = true)
+        mount(0)
+        compose.onNodeWithText("继续阅读").assertIsDisplayed()
+        val before = geometry()
+        compose.runOnIdle { state.value = state.value.copy(isLoading = false) }
+        compose.waitForIdle()
+        assertGeometry(before, 0)
+    }
+
     private fun dispatchInsets(visible: Boolean, cutoutTop: Int) {
         compose.runOnIdle {
             val status = Insets.of(0, 24, 0, 0)

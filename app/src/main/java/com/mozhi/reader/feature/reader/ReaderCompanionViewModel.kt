@@ -52,6 +52,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -111,6 +112,10 @@ class ReaderCompanionViewModel @Inject constructor(
 
     val genUiSettings = settingsRepository.companionGenUi
         .stateIn(viewModelScope, SharingStarted.Eagerly, com.mozhi.reader.core.datastore.CompanionGenUiSettings())
+
+    /** 悬浮球开关；读到值之前为 null，界面先不画球，关掉的用户进书时不会闪一下。 */
+    val orbVisible: StateFlow<Boolean?> = settingsRepository.companionOrbVisible
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     private var genUiBookData: kotlinx.serialization.json.JsonObject? = null
     private var genUiDarkPaper = false

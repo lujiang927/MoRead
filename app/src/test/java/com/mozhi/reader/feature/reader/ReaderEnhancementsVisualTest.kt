@@ -58,7 +58,7 @@ class ReaderEnhancementsVisualTest {
     }
 
     @Test fun readerTitleCssDoesNotChangePublisherHeadingLayout() {
-        val parsed = com.mozhi.reader.feature.importer.EpubLayoutDocumentParser().parseWithText(
+        val parsed = com.mozhi.reader.core.epub.EpubLayoutDocumentParser().parseWithText(
             "<html><body><h1>原书标题</h1><p>保持出版商正文与标题的距离。</p></body></html>".toByteArray(),
             0, "OPS/ch.xhtml", emptyMap())
         val layout = com.mozhi.reader.core.library.EpubLayoutChapterBundle(parsed.document, emptyMap(), emptyMap(), dom = parsed.dom,
